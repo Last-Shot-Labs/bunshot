@@ -15,6 +15,39 @@ A personal Bun + Hono API framework. Install it in any app and get auth, session
 
 ---
 
+## CLI — Scaffold a New Project
+
+```bash
+bunx @lastshotlabs/bunshot "My App"
+```
+
+You can also pass a custom directory name:
+
+```bash
+bunx @lastshotlabs/bunshot "My App" my-app-dir
+```
+
+This creates a ready-to-run project with:
+
+```
+my-app/
+  src/
+    index.ts            # entry point
+    config/index.ts     # centralized app configuration
+    lib/constants.ts    # app name, version, roles
+    routes/             # add your route files here
+    workers/            # BullMQ workers (auto-discovered)
+    middleware/          # custom middleware
+    models/             # data models
+    services/           # business logic
+  tsconfig.json         # pre-configured with path aliases
+  .env                  # environment variables template
+```
+
+Path aliases like `@config/*`, `@lib/*`, `@middleware/*`, `@models/*`, `@routes/*`, `@services/*`, and `@workers/*` are set up automatically in `tsconfig.json`.
+
+---
+
 ## Installation
 
 ```bash
@@ -32,14 +65,12 @@ bun add @lastshotlabs/bunshot
 ```ts
 // src/index.ts
 import { createServer } from "@lastshotlabs/bunshot";
+import { appConfig } from "@config/index";
 
-await createServer({
-  routesDir: import.meta.dir + "/routes",
-  workersDir: import.meta.dir + "/workers",
-  app: { name: "My App", version: "1.0.0" },
-  // db: { mongo: "single", redis: true } — defaults, connects automatically
-});
+await createServer(appConfig);
 ```
+
+All configuration lives in `src/config/index.ts` — see the CLI-generated scaffold for the full setup.
 
 That's it. Your app gets:
 
