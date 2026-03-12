@@ -15,6 +15,7 @@ import type { AuthRateLimitConfig } from "../app";
 const isProd = process.env.NODE_ENV === "production";
 const TokenResponse = z.object({ token: z.string(), emailVerified: z.boolean().optional() });
 const ErrorResponse = z.object({ error: z.string() });
+const tags = ["Auth"];
 
 const cookieOptions = {
   httpOnly: true,
@@ -47,7 +48,7 @@ export const createAuthRouter = ({ primaryField, emailVerification, rateLimit }:
     createRoute({
       method: "post",
       path: "/auth/register",
-      tags: ["Core"],
+      tags,
       request: { body: { content: { "application/json": { schema: RegisterSchema } } } },
       responses: {
         201: { content: { "application/json": { schema: TokenResponse } }, description: "Registered" },
@@ -73,7 +74,7 @@ export const createAuthRouter = ({ primaryField, emailVerification, rateLimit }:
     createRoute({
       method: "post",
       path: "/auth/login",
-      tags: ["Core"],
+      tags,
       request: { body: { content: { "application/json": { schema: LoginSchema } } } },
       responses: {
         200: { content: { "application/json": { schema: TokenResponse } }, description: "Logged in" },
@@ -107,7 +108,7 @@ export const createAuthRouter = ({ primaryField, emailVerification, rateLimit }:
     createRoute({
       method: "get",
       path: "/auth/me",
-      tags: ["Core"],
+      tags,
       responses: {
         200: {
           content: {
@@ -140,7 +141,7 @@ export const createAuthRouter = ({ primaryField, emailVerification, rateLimit }:
     createRoute({
       method: "post",
       path: "/auth/set-password",
-      tags: ["Core"],
+      tags,
       request: { body: { content: { "application/json": { schema: z.object({ password: z.string().min(8) }) } } } },
       responses: {
         200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Password set" },
@@ -165,7 +166,7 @@ export const createAuthRouter = ({ primaryField, emailVerification, rateLimit }:
     createRoute({
       method: "post",
       path: "/auth/logout",
-      tags: ["Core"],
+      tags,
       responses: {
         200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Logged out" },
       },
@@ -184,7 +185,7 @@ export const createAuthRouter = ({ primaryField, emailVerification, rateLimit }:
       createRoute({
         method: "post",
         path: "/auth/verify-email",
-        tags: ["Core"],
+        tags,
         request: { body: { content: { "application/json": { schema: z.object({ token: z.string() }) } } } },
         responses: {
           200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Email verified" },
@@ -213,7 +214,7 @@ export const createAuthRouter = ({ primaryField, emailVerification, rateLimit }:
       createRoute({
         method: "post",
         path: "/auth/resend-verification",
-        tags: ["Core"],
+        tags,
         responses: {
           200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Verification email sent" },
           400: { content: { "application/json": { schema: ErrorResponse } }, description: "Already verified" },
