@@ -1,0 +1,43 @@
+{
+  "compilerOptions": {
+    "types": [
+      "bun"
+    ],
+    "strict": true,
+    "moduleResolution": "bundler",
+    "module": "ESNext",
+    "target": "ESNext",
+    "paths": {
+      "@lib/*": [
+        "./src/lib/*"
+      ],
+      "@middleware/*": [
+        "./src/middleware/*"
+      ],
+      "@models/*": [
+        "./src/models/*"
+      ],
+      "@queues/*": [
+        "./src/queues/*"
+      ],
+      "@routes/*": [
+        "./src/routes/*"
+      ],
+      "@scripts/*": [
+        "./src/scripts/*"
+      ],
+      "@services/*": [
+        "./src/services/*"
+      ],
+      "@workers/*": [
+        "./src/workers/*"
+      ],
+      "@ws/*": [
+        "./src/ws/*"
+      ],
+      "@schemas/*": [
+        "./src/schemas/*"
+      ]
+    },
+  }
+}

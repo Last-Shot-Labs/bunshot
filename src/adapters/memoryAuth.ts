@@ -1,0 +1,240 @@
+import { HttpError } from "@lib/HttpError";
+import type { AuthAdapter, OAuthProfile } from "@lib/authAdapter";
+
+// ---------------------------------------------------------------------------
+// In-memory stores — module-level Maps, always ready, lost on process restart
+// ---------------------------------------------------------------------------
+
+interface UserRecord {
+  id: string;
+  email: string | null;
+  passwordHash: string | null;
+  providerIds: string[];
+  roles: string[];
+  emailVerified: boolean;
+}
+
+const _users              = new Map<string, UserRecord>();
+const _byEmail            = new Map<string, string>();
+const _sessions           = new Map<string, { token: string; expiresAt: number }>();
+const _oauthStates        = new Map<string, { codeVerifier?: string; linkUserId?: string; expiresAt: number }>();
+const _cache              = new Map<string, { value: string; expiresAt?: number }>();
+const _verificationTokens = new Map<string, { userId: string; email: string; expiresAt: number }>();
+
+/** Reset all in-memory state. Useful for test isolation. */
+export const clearMemoryStore = (): void => {
+  _users.clear();
+  _byEmail.clear();
+  _sessions.clear();
+  _oauthStates.clear();
+  _cache.clear();
+  _verificationTokens.clear();
+};
+
+// ---------------------------------------------------------------------------
+// Auth adapter
+// ---------------------------------------------------------------------------
+
+export const memoryAuthAdapter: AuthAdapter = {
+  async findByEmail(email) {
+    const id = _byEmail.get(email.toLowerCase());
+    if (!id) return null;
+    const user = _users.get(id);
+    if (!user || !user.passwordHash) return null;
+    return { id: user.id, passwordHash: user.passwordHash };
+  },
+
+  async create(email, passwordHash) {
+    const normalised = email.toLowerCase();
+    if (_byEmail.has(normalised)) throw new HttpError(409, "Email already registered");
+    const id = crypto.randomUUID();
+    const user: UserRecord = { id, email: normalised, passwordHash, providerIds: [], roles: [], emailVerified: false };
+    _users.set(id, user);
+    _byEmail.set(normalised, id);
+    return { id };
+  },
+
+  async setPassword(userId, passwordHash) {
+    const user = _users.get(userId);
+    if (!user) return;
+    user.passwordHash = passwordHash;
+  },
+
+  async findOrCreateByProvider(provider: string, providerId: string, profile: OAuthProfile) {
+    const key = `${provider}:${providerId}`;
+
+    // Find by provider key
+    for (const user of _users.values()) {
+      if (user.providerIds.includes(key)) return { id: user.id, created: false };
+    }
+
+    // Reject if email belongs to a credential account
+    if (profile.email) {
+      const existingId = _byEmail.get(profile.email.toLowerCase());
+      if (existingId) throw new HttpError(409, "An account with this email already exists. Sign in with your credentials, then link Google from your account settings.");
+    }
+
+    const id = crypto.randomUUID();
+    const email = profile.email ? profile.email.toLowerCase() : null;
+    const user: UserRecord = { id, email, passwordHash: null, providerIds: [key], roles: [], emailVerified: false };
+    _users.set(id, user);
+    if (email) _byEmail.set(email, id);
+    return { id, created: true };
+  },
+
+  async linkProvider(userId, provider, providerId) {
+    const user = _users.get(userId);
+    if (!user) throw new HttpError(404, "User not found");
+    const key = `${provider}:${providerId}`;
+    if (!user.providerIds.includes(key)) user.providerIds.push(key);
+  },
+
+  async getRoles(userId) {
+    return _users.get(userId)?.roles ?? [];
+  },
+
+  async setRoles(userId, roles) {
+    const user = _users.get(userId);
+    if (!user) return;
+    user.roles = [...roles];
+  },
+
+  async addRole(userId, role) {
+    const user = _users.get(userId);
+    if (!user) return;
+    if (!user.roles.includes(role)) user.roles.push(role);
+  },
+
+  async removeRole(userId, role) {
+    const user = _users.get(userId);
+    if (!user) return;
+    user.roles = user.roles.filter((r) => r !== role);
+  },
+
+  async getUser(userId) {
+    const user = _users.get(userId);
+    if (!user) return null;
+    return {
+      email: user.email ?? undefined,
+      providerIds: [...user.providerIds],
+      emailVerified: user.emailVerified,
+    };
+  },
+
+  async unlinkProvider(userId, provider) {
+    const user = _users.get(userId);
+    if (!user) throw new HttpError(404, "User not found");
+    user.providerIds = user.providerIds.filter((id) => !id.startsWith(`${provider}:`));
+  },
+
+  async findByIdentifier(value) {
+    const id = _byEmail.get(value.toLowerCase());
+    if (!id) return null;
+    const user = _users.get(id);
+    if (!user || !user.passwordHash) return null;
+    return { id: user.id, passwordHash: user.passwordHash };
+  },
+
+  async setEmailVerified(userId, verified) {
+    const user = _users.get(userId);
+    if (user) user.emailVerified = verified;
+  },
+
+  async getEmailVerified(userId) {
+    return _users.get(userId)?.emailVerified ?? false;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Session helpers (used by src/lib/session.ts)
+// ---------------------------------------------------------------------------
+
+const SESSION_TTL_MS = 60 * 60 * 24 * 7 * 1000; // 7 days
+
+export const memoryCreateSession = (userId: string, token: string): void => {
+  _sessions.set(userId, { token, expiresAt: Date.now() + SESSION_TTL_MS });
+};
+
+export const memoryGetSession = (userId: string): string | null => {
+  const entry = _sessions.get(userId);
+  if (!entry || entry.expiresAt <= Date.now()) return null;
+  return entry.token;
+};
+
+export const memoryDeleteSession = (userId: string): void => {
+  _sessions.delete(userId);
+};
+
+// ---------------------------------------------------------------------------
+// OAuth state helpers (used by src/lib/oauth.ts)
+// ---------------------------------------------------------------------------
+
+const OAUTH_STATE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+export const memoryStoreOAuthState = (state: string, codeVerifier?: string, linkUserId?: string): void => {
+  _oauthStates.set(state, { codeVerifier, linkUserId, expiresAt: Date.now() + OAUTH_STATE_TTL_MS });
+};
+
+export const memoryConsumeOAuthState = (state: string): { codeVerifier?: string; linkUserId?: string } | null => {
+  const entry = _oauthStates.get(state);
+  if (!entry || entry.expiresAt <= Date.now()) {
+    _oauthStates.delete(state);
+    return null;
+  }
+  _oauthStates.delete(state);
+  return { codeVerifier: entry.codeVerifier, linkUserId: entry.linkUserId };
+};
+
+// ---------------------------------------------------------------------------
+// Cache helpers (used by src/middleware/cacheResponse.ts)
+// ---------------------------------------------------------------------------
+
+export const memoryGetCache = (key: string): string | null => {
+  const entry = _cache.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt !== undefined && entry.expiresAt <= Date.now()) {
+    _cache.delete(key);
+    return null;
+  }
+  return entry.value;
+};
+
+export const memorySetCache = (key: string, value: string, ttlSeconds?: number): void => {
+  const expiresAt = ttlSeconds ? Date.now() + ttlSeconds * 1000 : undefined;
+  _cache.set(key, { value, expiresAt });
+};
+
+export const memoryDelCache = (key: string): void => {
+  _cache.delete(key);
+};
+
+export const memoryDelCachePattern = (pattern: string): void => {
+  // Convert glob * to a regex
+  const regex = new RegExp("^" + pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$");
+  for (const key of _cache.keys()) {
+    if (regex.test(key)) _cache.delete(key);
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Email verification token helpers (used by src/lib/emailVerification.ts)
+// ---------------------------------------------------------------------------
+
+const EMAIL_VERIFICATION_TTL_MS = 60 * 60 * 24 * 1000; // 24 hours
+
+export const memoryCreateVerificationToken = (token: string, userId: string, email: string): void => {
+  _verificationTokens.set(token, { userId, email, expiresAt: Date.now() + EMAIL_VERIFICATION_TTL_MS });
+};
+
+export const memoryGetVerificationToken = (token: string): { userId: string; email: string } | null => {
+  const entry = _verificationTokens.get(token);
+  if (!entry || entry.expiresAt <= Date.now()) {
+    _verificationTokens.delete(token);
+    return null;
+  }
+  return { userId: entry.userId, email: entry.email };
+};
+
+export const memoryDeleteVerificationToken = (token: string): void => {
+  _verificationTokens.delete(token);
+};
