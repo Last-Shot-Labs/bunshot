@@ -1407,9 +1407,9 @@ import {
   createServer, createApp,
 
   // DB
-  connectMongo, connectAuthMongo, connectAppMongo,
+  connectMongo, connectAuthMongo, connectAppMongo, disconnectMongo,
   authConnection, appConnection, mongoose,
-  connectRedis, getRedis,
+  connectRedis, disconnectRedis, getRedis,
 
   // Jobs
   createQueue, createWorker,

@@ -67,4 +67,16 @@ export const connectMongo = async (): Promise<void> => {
   log(`[mongo] connected to ${host} as ${user}`);
 };
 
+/**
+ * Close both auth and app Mongo connections.
+ * Useful for one-off scripts that need a clean exit.
+ */
+export const disconnectMongo = async (): Promise<void> => {
+  await Promise.all([
+    authConnection.readyState !== 0 ? authConnection.close() : Promise.resolve(),
+    appConnection.readyState !== 0 ? appConnection.close() : Promise.resolve(),
+  ]);
+  log("[mongo] disconnected");
+};
+
 export { mongoose };

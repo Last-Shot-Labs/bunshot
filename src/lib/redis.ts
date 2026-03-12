@@ -39,6 +39,17 @@ export const connectRedis = (): Promise<void> => {
   });
 };
 
+/**
+ * Gracefully close the Redis connection.
+ * Useful for one-off scripts that need a clean exit.
+ */
+export const disconnectRedis = async (): Promise<void> => {
+  if (!client) return;
+  await client.quit();
+  client = null;
+  log("[redis] disconnected");
+};
+
 export const getRedis = (): Redis => {
   if (!client) throw new Error("Redis not connected — call connectRedis() first");
   return client;

@@ -40,8 +40,8 @@ This is a **Bun + Hono API framework library** that consuming projects install a
 
 | File | Purpose |
 |------|---------|
-| `mongo.ts` | Mongoose connection management |
-| `redis.ts` | ioredis client |
+| `mongo.ts` | Mongoose connection management; `disconnectMongo()` for clean shutdown |
+| `redis.ts` | ioredis client; `disconnectRedis()` for clean shutdown |
 | `jwt.ts` | `jose`-based JWT sign/verify |
 | `session.ts` | Session CRUD — store set via `db.sessions` ("redis" \| "mongo" \| "sqlite" \| "memory") |
 | `auth.ts` | Register/login/logout/password logic |
