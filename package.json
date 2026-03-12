@@ -16,14 +16,24 @@
     "websocket",
     "openapi"
   ],
-  "module": "src/index.ts",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
   },
   "bin": {
-    "bunshot": "./src/cli.ts"
+    "bunshot": "./dist/cli.js"
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
+    "build": "bun build src/index.ts --outdir dist --minify --target bun --external '*' && bun build src/cli.ts --outdir dist --minify --target bun --external '*' && tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
+    "prepublishOnly": "bun run build",
+    "release": "npm version patch && npm publish",
     "dev": "bun --watch src/index.ts",
     "start": "bun src/index.ts"
   },
@@ -39,7 +49,9 @@
     "zod": "4.3.6"
   },
   "devDependencies": {
-    "@types/bun": "1.3.10"
+    "@types/bun": "1.3.10",
+    "tsc-alias": "^1.8.16",
+    "typescript": "^5.9.3"
   },
   "publishConfig": {
     "access": "public"
