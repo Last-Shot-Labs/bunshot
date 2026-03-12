@@ -31,7 +31,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "bun build src/index.ts --outdir dist --minify --target bun --external @hono/zod-openapi --external @scalar/hono-api-reference --external arctic --external bullmq --external hono --external ioredis --external jose --external mongoose --external zod && bun build src/cli.ts --outdir dist --minify --target bun --external @hono/zod-openapi --external @scalar/hono-api-reference --external arctic --external bullmq --external hono --external ioredis --external jose --external mongoose --external zod && tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json && bun build src/cli.ts --outdir dist --minify --target bun",
     "prepublishOnly": "bun run build",
     "release": "npm version patch && npm publish",
     "dev": "bun --watch src/index.ts",
