@@ -40,7 +40,7 @@ if (existsSync(projectDir)) {
 }
 
 // --- templates ---
-const indexContent = `import { createServer, type CreateServerConfig } from "@last-shot-labs/bunshot";
+const indexContent = `import { createServer, type CreateServerConfig } from "@lastshotlabs/bunshot";
 
 const roles = {
   admin: "admin",
@@ -72,7 +72,7 @@ await createServer(config);
 
 const readmeContent = `# ${appTitle}
 
-Built with [@last-shot-labs/bunshot](https://github.com/Last-Shot-Labs/bunshot).
+Built with [@lastshotlabs/bunshot](https://github.com/Last-Shot-Labs/bunshot).
 
 ## Getting started
 
@@ -103,7 +103,7 @@ Create a file in \`src/routes/\`:
 
 \`\`\`ts
 // src/routes/products.ts
-import { createRouter } from "@last-shot-labs/bunshot";
+import { createRouter } from "@lastshotlabs/bunshot";
 import { z } from "zod";
 
 export const router = createRouter();
@@ -115,7 +115,7 @@ router.get("/products", (c) => c.json({ products: [] }));
 
 \`\`\`ts
 // src/models/Product.ts
-import { appConnection, mongoose } from "@last-shot-labs/bunshot";
+import { appConnection, mongoose } from "@lastshotlabs/bunshot";
 
 const ProductSchema = new mongoose.Schema({
   name: { type: String, required: true },
@@ -183,7 +183,7 @@ APPLE_REDIRECT_URI=
 `;
 
 // --- scaffold ---
-console.log(`\n@last-shot-labs/bunshot — creating ${dirName}\n`);
+console.log(`\n@lastshotlabs/bunshot — creating ${dirName}\n`);
 
 mkdirSync(projectDir, { recursive: true });
 
@@ -200,7 +200,7 @@ const pkgPath = join(projectDir, "package.json");
 const pkg = JSON.parse(require("fs").readFileSync(pkgPath, "utf-8"));
 pkg.module = "src/index.ts";
 pkg.scripts = { dev: "bun --watch src/index.ts", start: "bun src/index.ts" };
-pkg.dependencies = { ...pkg.dependencies, "@last-shot-labs/bunshot": "*" };
+pkg.dependencies = { ...pkg.dependencies, "@lastshotlabs/bunshot": "*" };
 writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n", "utf-8");
 
 // Patch tsconfig.json: add path aliases

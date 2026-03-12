@@ -1,13 +1,21 @@
 {
-  "name": "@last-shot-labs/bunshot",
-  "version": "0.0.1",
+  "name": "@lastshotlabs/bunshot",
+  "version": "0.0.2",
   "description": "Batteries-included Bun + Hono API framework — auth, sessions, rate limiting, WebSocket, queues, and OpenAPI docs out of the box",
   "repository": {
     "type": "git",
     "url": "https://github.com/Last-Shot-Labs/bunshot.git"
   },
   "license": "MIT",
-  "keywords": ["bun", "hono", "api", "framework", "auth", "websocket", "openapi"],
+  "keywords": [
+    "bun",
+    "hono",
+    "api",
+    "framework",
+    "auth",
+    "websocket",
+    "openapi"
+  ],
   "module": "src/index.ts",
   "exports": {
     ".": "./src/index.ts"

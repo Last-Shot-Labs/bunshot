@@ -13,7 +13,7 @@ bun run dev     # Watch mode (hot reload)
 bun run start   # Run without watch
 ```
 
-There are no build, test, or lint scripts — this is a library package published to npm as `@last-shot-labs/bunshot`.
+There are no build, test, or lint scripts — this is a library package published to npm as `@lastshotlabs/bunshot`.
 
 ## Architecture
 

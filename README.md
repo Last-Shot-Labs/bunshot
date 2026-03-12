@@ -7,8 +7,8 @@ A personal Bun + Hono API framework. Install it in any app and get auth, session
 - **Runtime**: [Bun](https://bun.sh)
 - **Framework**: [Hono](https://hono.dev) + [@hono/zod-openapi](https://github.com/honojs/middleware/tree/main/packages/zod-openapi)
 - **Docs UI**: [Scalar](https://scalar.com)
-- **Database**: MongoDB via [Mongoose](https://mongoosejs.com) (default auth store — swappable via `db.auth` or `auth.adapter`)
-- **Cache / Sessions**: Redis via [ioredis](https://github.com/redis/ioredis) (also supports MongoDB, SQLite, and memory)
+- **Data / Auth**: MongoDB, SQLite, or in-memory — configurable via `db.auth` (default: MongoDB via [Mongoose](https://mongoosejs.com))
+- **Cache / Sessions**: Redis, MongoDB, SQLite, or in-memory — configurable via `db.sessions` / `db.cache` (default: Redis via [ioredis](https://github.com/redis/ioredis))
 - **Auth**: JWT via [jose](https://github.com/panva/jose), HttpOnly cookies + `x-user-token` header
 - **Queues**: [BullMQ](https://docs.bullmq.io) (requires Redis with `noeviction` policy)
 - **Validation**: [Zod v4](https://zod.dev)
@@ -19,10 +19,10 @@ A personal Bun + Hono API framework. Install it in any app and get auth, session
 
 ```bash
 # from a local path (while developing the package)
-bun add @last-shot-labs/bunshot@file:../bunshot
+bun add @lastshotlabs/bunshot@file:../bunshot
 
 # from GitHub Packages (once published)
-bun add @last-shot-labs/bunshot
+bun add @lastshotlabs/bunshot
 ```
 
 ---
@@ -31,7 +31,7 @@ bun add @last-shot-labs/bunshot
 
 ```ts
 // src/index.ts
-import { createServer } from "@last-shot-labs/bunshot";
+import { createServer } from "@lastshotlabs/bunshot";
 
 await createServer({
   routesDir: import.meta.dir + "/routes",
@@ -67,7 +67,7 @@ Drop a file in your `routes/` directory. It must export a `router`:
 // src/routes/products.ts
 import { createRoute } from "@hono/zod-openapi";
 import { z } from "zod";
-import { createRouter, userAuth } from "@last-shot-labs/bunshot";
+import { createRouter, userAuth } from "@lastshotlabs/bunshot";
 
 export const router = createRouter();
 
@@ -144,7 +144,7 @@ await createServer({
 Set `mongo: false` and/or `redis: false` to skip auto-connect and manage connections yourself:
 
 ```ts
-import { connectAuthMongo, connectAppMongo, connectRedis, createServer } from "@last-shot-labs/bunshot";
+import { connectAuthMongo, connectAppMongo, connectRedis, createServer } from "@lastshotlabs/bunshot";
 
 await connectAuthMongo();
 await connectAppMongo();
@@ -166,7 +166,7 @@ Import `appConnection` and register models on it. This ensures your models use t
 
 ```ts
 // src/models/Product.ts
-import { appConnection, mongoose } from "@last-shot-labs/bunshot";
+import { appConnection, mongoose } from "@lastshotlabs/bunshot";
 
 const ProductSchema = new mongoose.Schema({
   name: { type: String, required: true },
@@ -191,7 +191,7 @@ Queues and workers share the existing Redis connection automatically.
 
 ```ts
 // src/queues/email.ts
-import { createQueue } from "@last-shot-labs/bunshot";
+import { createQueue } from "@lastshotlabs/bunshot";
 
 export type EmailJob = { to: string; subject: string; body: string };
 
@@ -213,7 +213,7 @@ await emailQueue.add("send-reset", payload, { delay: 5000, attempts: 3 });
 
 ```ts
 // src/workers/email.ts
-import { createWorker } from "@last-shot-labs/bunshot";
+import { createWorker } from "@lastshotlabs/bunshot";
 import type { EmailJob } from "../queues/email";
 
 export const emailWorker = createWorker<EmailJob>("email", async (job) => {
@@ -230,7 +230,7 @@ Use `publish` to broadcast to all connected clients from inside a worker (or any
 
 ```ts
 // src/workers/notify.ts
-import { createWorker, publish } from "@last-shot-labs/bunshot";
+import { createWorker, publish } from "@lastshotlabs/bunshot";
 import type { NotifyJob } from "../queues/notify";
 
 export const notifyWorker = createWorker<NotifyJob>("notify", async (job) => {
@@ -271,7 +271,7 @@ type SocketData<T extends object = object> = {
 **Extending with custom fields:**
 
 ```ts
-import { createServer, type SocketData } from "@last-shot-labs/bunshot";
+import { createServer, type SocketData } from "@lastshotlabs/bunshot";
 
 type MyData = { tenantId: string; role: "admin" | "user" };
 
@@ -384,7 +384,7 @@ Any non-room message is passed through to your `websocket.message` handler uncha
 ### Server → room: broadcast
 
 ```ts
-import { publish } from "@last-shot-labs/bunshot";
+import { publish } from "@lastshotlabs/bunshot";
 
 publish("chat:general", { text: "Hello room!", from: "system" });
 ```
@@ -396,7 +396,7 @@ All sockets subscribed to `"chat:general"` receive the message. Works from anywh
 Use `subscribe` / `unsubscribe` anywhere you have a `ws` reference (e.g. in `ws.handler.open` to auto-join personal rooms):
 
 ```ts
-import { subscribe, unsubscribe, getSubscriptions } from "@last-shot-labs/bunshot";
+import { subscribe, unsubscribe, getSubscriptions } from "@lastshotlabs/bunshot";
 
 await createServer({
   ws: {
@@ -465,7 +465,7 @@ Write it using core's exported types:
 ```ts
 // src/middleware/tenant.ts
 import type { MiddlewareHandler } from "hono";
-import type { AppEnv } from "@last-shot-labs/bunshot";
+import type { AppEnv } from "@lastshotlabs/bunshot";
 
 export const tenantMiddleware: MiddlewareHandler<AppEnv> = async (c, next) => {
   // c.get("userId") is available — identify has already run
@@ -476,7 +476,7 @@ export const tenantMiddleware: MiddlewareHandler<AppEnv> = async (c, next) => {
 ### Per-route
 
 ```ts
-import { userAuth, rateLimit } from "@last-shot-labs/bunshot";
+import { userAuth, rateLimit } from "@lastshotlabs/bunshot";
 
 router.use("/admin", userAuth);
 router.use("/admin", rateLimit({ windowMs: 60_000, max: 10 }));
@@ -491,7 +491,7 @@ Cache GET responses and bust them from mutation endpoints. Supports Redis, Mongo
 ### Basic usage
 
 ```ts
-import { cacheResponse, bustCache } from "@last-shot-labs/bunshot";
+import { cacheResponse, bustCache } from "@lastshotlabs/bunshot";
 
 // GET — cache the response for 60 seconds in Redis (default)
 router.use("/products", cacheResponse({ ttl: 60, key: "products" }));
@@ -591,7 +591,7 @@ Only 2xx responses are cached. Non-2xx responses pass through uncached. Omit `tt
 When cache keys include variable parts (e.g. query params), use `bustCachePattern` to invalidate an entire logical group at once. It runs against all four stores — Redis (via SCAN), Mongo (via regex), SQLite (via LIKE), and Memory (via regex) — in parallel:
 
 ```ts
-import { bustCachePattern } from "@last-shot-labs/bunshot";
+import { bustCachePattern } from "@lastshotlabs/bunshot";
 
 // key includes query params: `balance:${userId}:${from}:${to}:${groupBy}`
 // bust all balance entries for this user regardless of params
@@ -608,7 +608,7 @@ When building a tenant app or any app that needs extra typed context variables (
 
 ```ts
 // src/lib/context.ts
-import { createRouter as coreCreateRouter, type AppEnv } from "@last-shot-labs/bunshot";
+import { createRouter as coreCreateRouter, type AppEnv } from "@lastshotlabs/bunshot";
 import type { OpenAPIHono } from "@hono/zod-openapi";
 
 export type MyVariables = AppEnv["Variables"] & {
@@ -625,7 +625,7 @@ Use the local `createRouter` instead of the one from the package — your routes
 ```ts
 // src/routes/items.ts
 import { createRouter } from "../lib/context";
-import { userAuth } from "@last-shot-labs/bunshot";
+import { userAuth } from "@lastshotlabs/bunshot";
 
 export const router = createRouter();
 
@@ -791,7 +791,7 @@ await createServer({
 Expired rows are filtered out lazily on read. For long-running servers, sweep them periodically:
 
 ```ts
-import { startSqliteCleanup } from "@last-shot-labs/bunshot";
+import { startSqliteCleanup } from "@lastshotlabs/bunshot";
 
 startSqliteCleanup();           // default: every hour
 startSqliteCleanup(5 * 60_000); // custom interval (ms)
@@ -802,7 +802,7 @@ startSqliteCleanup(5 * 60_000); // custom interval (ms)
 Pure in-memory Maps. No files, no external services. All state is lost on process restart.
 
 ```ts
-import { createServer, clearMemoryStore } from "@last-shot-labs/bunshot";
+import { createServer, clearMemoryStore } from "@lastshotlabs/bunshot";
 
 await createServer({
   routesDir: import.meta.dir + "/routes",
@@ -841,7 +841,7 @@ Sessions are backed by Redis by default (`session:{appName}:{userId}`). Set `db.
 ### Protecting routes
 
 ```ts
-import { userAuth, requireRole, requireVerifiedEmail } from "@last-shot-labs/bunshot";
+import { userAuth, requireRole, requireVerifiedEmail } from "@lastshotlabs/bunshot";
 
 router.use("/my-route", userAuth);                              // returns 401 if not logged in
 router.use("/admin", userAuth, requireRole("admin"));           // returns 403 if user lacks role
@@ -861,8 +861,8 @@ ALTER TABLE users ADD COLUMN roles text[] NOT NULL DEFAULT '{}';
 ```
 
 ```ts
-import type { AuthAdapter } from "@last-shot-labs/bunshot";
-import { HttpError } from "@last-shot-labs/bunshot";
+import type { AuthAdapter } from "@lastshotlabs/bunshot";
+import { HttpError } from "@lastshotlabs/bunshot";
 import { db } from "./db";
 import { users } from "./schema";
 import { eq, sql } from "drizzle-orm";
@@ -964,7 +964,7 @@ await createServer({
 If a legitimate user gets locked out, call `bustAuthLimit` with the same key format the limiter uses:
 
 ```ts
-import { bustAuthLimit } from "@last-shot-labs/bunshot";
+import { bustAuthLimit } from "@lastshotlabs/bunshot";
 
 // Admin route: POST /admin/unblock-login
 router.post("/admin/unblock-login", userAuth, requireRole("admin"), async (c) => {
@@ -981,7 +981,7 @@ Key formats: `login:{identifier}`, `register:{ip}`, `verify:{ip}`, `resend:{user
 `trackAttempt` and `isLimited` are exported so you can apply the same Redis-backed rate limiting to any route in your app. They use the same store configured via `auth.rateLimit.store`.
 
 ```ts
-import { trackAttempt, isLimited, bustAuthLimit } from "@last-shot-labs/bunshot";
+import { trackAttempt, isLimited, bustAuthLimit } from "@lastshotlabs/bunshot";
 
 // trackAttempt — increments the counter and returns true if now over the limit
 // isLimited    — checks without incrementing (read-only)
@@ -1064,7 +1064,7 @@ Both options can be combined. The middleware order is: blocklist → IP rate lim
 `botProtection` is also exported for per-route use:
 
 ```ts
-import { botProtection } from "@last-shot-labs/bunshot";
+import { botProtection } from "@lastshotlabs/bunshot";
 
 router.use("/api/submit", botProtection({ blockList: ["198.51.100.0/24"] }));
 ```
@@ -1129,7 +1129,7 @@ Three helpers are available depending on what you need:
 | `removeUserRole(userId, role)` | Remove a single role, leaving others unchanged |
 
 ```ts
-import { setUserRoles, addUserRole, removeUserRole, userAuth, requireRole } from "@last-shot-labs/bunshot";
+import { setUserRoles, addUserRole, removeUserRole, userAuth, requireRole } from "@lastshotlabs/bunshot";
 
 // promote a user to admin
 router.post("/admin/users/:id/promote", userAuth, requireRole("admin"), async (c) => {
@@ -1156,7 +1156,7 @@ router.put("/admin/users/:id/roles", userAuth, requireRole("admin"), async (c) =
 `requireRole` is a middleware factory. It lazy-fetches roles on the first role-checked request and caches them on the Hono context, so multiple `requireRole` calls in a middleware chain only hit the DB once.
 
 ```ts
-import { userAuth, requireRole } from "@last-shot-labs/bunshot";
+import { userAuth, requireRole } from "@lastshotlabs/bunshot";
 
 router.use("/admin", userAuth, requireRole("admin"));
 router.use("/content", userAuth, requireRole("admin", "editor")); // allow either role
@@ -1394,7 +1394,7 @@ APPLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n..."
 To test changes locally, install the package from the local path in a sibling project:
 
 ```bash
-bun add @last-shot-labs/bunshot@file:../bunshot
+bun add @lastshotlabs/bunshot@file:../bunshot
 ```
 
 ---
@@ -1454,5 +1454,5 @@ import {
   type DbConfig, type AppMeta, type AuthConfig, type OAuthConfig, type SecurityConfig,
   type PrimaryField, type EmailVerificationConfig,
   type SocketData, type WsConfig,
-} from "@last-shot-labs/bunshot";
+} from "@lastshotlabs/bunshot";
 ```
