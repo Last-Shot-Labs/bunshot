@@ -32,7 +32,7 @@ This is a **Bun + Hono API framework library** that consuming projects install a
 
 **Worker auto-discovery:** BullMQ workers are placed in a `workers/` directory and auto-started by `createServer`.
 
-**Auth flow:** `src/lib/auth.ts` orchestrates login/register/logout/email-verification. The auth store is pluggable via `AuthAdapter` interface (default: `src/adapters/mongoAuth.ts`). Sessions can be stored in Redis, MongoDB, SQLite, or memory — configured via `db.sessions` in `CreateAppConfig`. Login identifier is configurable via `auth.primaryField` (`"email"` | `"username"` | `"phone"`). Email verification is opt-in via `auth.emailVerification` (supports `required: true` to block login until verified).
+**Auth flow:** `src/lib/auth.ts` orchestrates login/register/logout/email-verification. The auth store is pluggable via `AuthAdapter` interface (default: `src/adapters/mongoAuth.ts`). Sessions can be stored in Redis, MongoDB, SQLite, or memory — configured via `db.sessions` in `CreateAppConfig`. Login identifier is configurable via `auth.primaryField` (`"email"` | `"username"` | `"phone"`). Email verification is opt-in via `auth.emailVerification` (supports `required: true` to block login until verified, `tokenExpiry` in seconds to control token TTL — defaults to 24 hours).
 
 **Context extension:** The framework exposes a typed `AppContext` (Hono `Context`) that consuming apps extend with their own variables.
 

@@ -1,6 +1,6 @@
 import { getRedis } from "./redis";
 import { appConnection } from "./mongo";
-import { getAppName } from "./appConfig";
+import { getAppName, getTokenExpiry } from "./appConfig";
 import { Schema } from "mongoose";
 import {
   sqliteCreateVerificationToken,
@@ -48,25 +48,20 @@ let _store: VerificationStore = "redis";
 export const setEmailVerificationStore = (store: VerificationStore) => { _store = store; };
 
 // ---------------------------------------------------------------------------
-// TTL
-// ---------------------------------------------------------------------------
-
-const TTL_SECONDS = 60 * 60 * 24; // 24 hours
-
-// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
 export const createVerificationToken = async (userId: string, email: string): Promise<string> => {
   const token = crypto.randomUUID();
-  if (_store === "memory") { memoryCreateVerificationToken(token, userId, email); return token; }
-  if (_store === "sqlite") { sqliteCreateVerificationToken(token, userId, email); return token; }
+  const ttl = getTokenExpiry();
+  if (_store === "memory") { memoryCreateVerificationToken(token, userId, email, ttl); return token; }
+  if (_store === "sqlite") { sqliteCreateVerificationToken(token, userId, email, ttl); return token; }
   if (_store === "mongo") {
     await getVerificationModel().create({
       token,
       userId,
       email,
-      expiresAt: new Date(Date.now() + TTL_SECONDS * 1000),
+      expiresAt: new Date(Date.now() + ttl * 1000),
     });
     return token;
   }
@@ -74,7 +69,7 @@ export const createVerificationToken = async (userId: string, email: string): Pr
     `verify:${getAppName()}:${token}`,
     JSON.stringify({ userId, email }),
     "EX",
-    TTL_SECONDS
+    ttl
   );
   return token;
 };

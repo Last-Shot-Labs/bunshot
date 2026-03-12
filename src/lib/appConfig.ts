@@ -3,6 +3,8 @@ export type PrimaryField = "email" | "username" | "phone";
 export interface EmailVerificationConfig {
   /** Block login until email is verified. Defaults to false (soft gate — emailVerified returned in login response). */
   required?: boolean;
+  /** Token time-to-live in seconds. Defaults to 86 400 (24 hours). */
+  tokenExpiry?: number;
   /** Called after registration with the identifier and verification token. Use to send the email. */
   onSend: (email: string, token: string) => Promise<void>;
 }
@@ -27,3 +29,6 @@ export const getPrimaryField = () => _primaryField;
 
 export const setEmailVerificationConfig = (config: EmailVerificationConfig | null) => { _emailVerificationConfig = config; };
 export const getEmailVerificationConfig = () => _emailVerificationConfig;
+
+const DEFAULT_TOKEN_EXPIRY = 60 * 60 * 24; // 24 hours
+export const getTokenExpiry = (): number => _emailVerificationConfig?.tokenExpiry ?? DEFAULT_TOKEN_EXPIRY;

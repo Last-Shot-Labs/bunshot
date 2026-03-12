@@ -686,6 +686,7 @@ await createServer({
     primaryField: "email",                  // default: "email" — use "username" or "phone" to change the login identifier
     emailVerification: {                    // optional — only active when primaryField is "email"
       required: true,                       // default: false (soft gate) — set true to block login until verified
+      tokenExpiry: 60 * 60,                 // default: 86400 (24 hours) — token TTL in seconds
       onSend: async (email, token) => {     // called after registration and resend — use any email provider
         await resend.emails.send({ to: email, subject: "Verify your email", text: `Token: ${token}` });
       },

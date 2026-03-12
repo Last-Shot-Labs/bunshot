@@ -283,10 +283,8 @@ export const sqliteDelCachePattern = (pattern: string): void => {
 // Email verification token helpers (used by src/lib/emailVerification.ts)
 // ---------------------------------------------------------------------------
 
-const EMAIL_VERIFICATION_TTL_MS = 60 * 60 * 24 * 1000; // 24 hours
-
-export const sqliteCreateVerificationToken = (token: string, userId: string, email: string): void => {
-  const expiresAt = Date.now() + EMAIL_VERIFICATION_TTL_MS;
+export const sqliteCreateVerificationToken = (token: string, userId: string, email: string, ttlSeconds: number): void => {
+  const expiresAt = Date.now() + ttlSeconds * 1000;
   getDb().run(
     "INSERT INTO email_verifications (token, userId, email, expiresAt) VALUES (?, ?, ?, ?)",
     [token, userId, email, expiresAt]

@@ -220,10 +220,8 @@ export const memoryDelCachePattern = (pattern: string): void => {
 // Email verification token helpers (used by src/lib/emailVerification.ts)
 // ---------------------------------------------------------------------------
 
-const EMAIL_VERIFICATION_TTL_MS = 60 * 60 * 24 * 1000; // 24 hours
-
-export const memoryCreateVerificationToken = (token: string, userId: string, email: string): void => {
-  _verificationTokens.set(token, { userId, email, expiresAt: Date.now() + EMAIL_VERIFICATION_TTL_MS });
+export const memoryCreateVerificationToken = (token: string, userId: string, email: string, ttlSeconds: number): void => {
+  _verificationTokens.set(token, { userId, email, expiresAt: Date.now() + ttlSeconds * 1000 });
 };
 
 export const memoryGetVerificationToken = (token: string): { userId: string; email: string } | null => {

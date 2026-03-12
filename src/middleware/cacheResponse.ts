@@ -147,7 +147,8 @@ export const bustCachePattern = async (pattern: string) => {
   await Promise.all([storeDelPattern("redis", fullPattern), storeDelPattern("mongo", fullPattern), storeDelPattern("sqlite", fullPattern), storeDelPattern("memory", fullPattern)]);
 };
 
-type KeyFn = (c: Parameters<MiddlewareHandler<AppEnv>>[0]) => string;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type KeyFn = (c: Parameters<MiddlewareHandler<any>>[0]) => string;
 
 interface CacheOptions {
   ttl?: number; // seconds — omit for indefinite
