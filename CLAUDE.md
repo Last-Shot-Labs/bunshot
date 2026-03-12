@@ -97,6 +97,6 @@ Defined in `tsconfig.json`, used throughout the codebase:
 
 ### Environment Variables
 
-See README.md for the full reference. Key vars: `MONGO_URI`, `REDIS_URL`, `JWT_SECRET`, `BEARER_TOKEN`, `PORT`.
+See README.md for the full reference. All DB/auth vars are split by environment: `*_DEV` / `*_PROD` (selected by `NODE_ENV`). Key groups: `MONGO_*`, `REDIS_*`, `JWT_SECRET_*`, `BEARER_TOKEN_*`, `PORT`.
 
 

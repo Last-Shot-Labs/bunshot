@@ -29,6 +29,10 @@ const projectDir = join(process.cwd(), dirName);
 const srcDir     = join(projectDir, "src");
 const routesDir  = join(srcDir, "routes");
 const workersDir = join(srcDir, "workers");
+const queuesDir  = join(srcDir, "queues");
+const wsDir      = join(srcDir, "ws");
+const servicesDir = join(srcDir, "services");
+
 
 if (existsSync(projectDir)) {
   console.error(`Directory "${dirName}" already exists.`);
@@ -38,9 +42,6 @@ if (existsSync(projectDir)) {
 // --- templates ---
 const indexContent = `import { createServer, type CreateServerConfig } from "@last-shot-labs/bunshot";
 
-const appTitle = "${appTitle}";
-const appVersion = "1.0.0";
-
 const roles = {
   admin: "admin",
   user: "user",
@@ -49,15 +50,21 @@ const roles = {
 const config: CreateServerConfig = {
   routesDir: import.meta.dir + "/routes",
   workersDir: import.meta.dir + "/workers",
-  openapi: {
-    title: appTitle,
-    version: appVersion,
+  app: {
+    name: "${appTitle}",
+    version: "1.0.0",
+  },
+  auth: {
+    roles: Object.values(roles),
+    defaultRole: roles.user,
+  },
+  security: {
+    cors: ["*"],
+  },
+  db: {
+    mongo: "single",
   },
   port: process.env.PORT ? parseInt(process.env.PORT) : 3000,
-  roles: Object.values(roles),
-  defaultRole: roles.user,
-  corsOrigins: ["*"],
-  mongo: "single",
 };
 
 await createServer(config);
@@ -70,7 +77,7 @@ Built with [@last-shot-labs/bunshot](https://github.com/Last-Shot-Labs/bunshot).
 ## Getting started
 
 \`\`\`bash
-cp .env.example .env  # fill in your values
+# fill in .env with your values
 bun dev
 \`\`\`
 
@@ -99,11 +106,9 @@ Create a file in \`src/routes/\`:
 import { createRouter } from "@last-shot-labs/bunshot";
 import { z } from "zod";
 
-const router = createRouter();
+export const router = createRouter();
 
 router.get("/products", (c) => c.json({ products: [] }));
-
-export default router;
 \`\`\`
 
 ## Adding models
@@ -212,6 +217,9 @@ tsconfig.compilerOptions = {
     "@scripts/*":    ["./src/scripts/*"],
     "@services/*":   ["./src/services/*"],
     "@workers/*":    ["./src/workers/*"],
+    "@queues":       ["./src/queues/index.ts"],
+    "@jobs":         ["./src/queues/jobs.ts"],
+    "@ws":           ["./src/ws/index.ts"],
   },
 };
 writeFileSync(tsconfigPath, JSON.stringify(tsconfig, null, 2) + "\n", "utf-8");
@@ -219,6 +227,9 @@ writeFileSync(tsconfigPath, JSON.stringify(tsconfig, null, 2) + "\n", "utf-8");
 // Create src structure
 mkdirSync(routesDir, { recursive: true });
 mkdirSync(workersDir, { recursive: true });
+mkdirSync(queuesDir, { recursive: true });
+mkdirSync(wsDir, { recursive: true });
+mkdirSync(servicesDir, { recursive: true });
 writeFileSync(join(srcDir, "index.ts"), indexContent, "utf-8");
 writeFileSync(join(projectDir, ".env"), envContent, "utf-8");
 writeFileSync(join(projectDir, "README.md"), readmeContent, "utf-8");
@@ -227,6 +238,9 @@ console.log("  Created:");
 console.log(`    + ${dirName}/src/index.ts`);
 console.log(`    + ${dirName}/src/routes/`);
 console.log(`    + ${dirName}/src/workers/`);
+console.log(`    + ${dirName}/src/queues/`);
+console.log(`    + ${dirName}/src/ws/`);
+console.log(`    + ${dirName}/src/services/`);
 console.log(`    + ${dirName}/.env`);
 console.log(`    + ${dirName}/README.md`);
 

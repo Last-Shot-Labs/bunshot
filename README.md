@@ -7,8 +7,8 @@ A personal Bun + Hono API framework. Install it in any app and get auth, session
 - **Runtime**: [Bun](https://bun.sh)
 - **Framework**: [Hono](https://hono.dev) + [@hono/zod-openapi](https://github.com/honojs/middleware/tree/main/packages/zod-openapi)
 - **Docs UI**: [Scalar](https://scalar.com)
-- **Database**: MongoDB via [Mongoose](https://mongoosejs.com) (default auth store — swappable via `authAdapter`)
-- **Cache / Sessions**: Redis via [ioredis](https://github.com/redis/ioredis) (response cache and sessions also support MongoDB)
+- **Database**: MongoDB via [Mongoose](https://mongoosejs.com) (default auth store — swappable via `db.auth` or `auth.adapter`)
+- **Cache / Sessions**: Redis via [ioredis](https://github.com/redis/ioredis) (also supports MongoDB, SQLite, and memory)
 - **Auth**: JWT via [jose](https://github.com/panva/jose), HttpOnly cookies + `x-user-token` header
 - **Queues**: [BullMQ](https://docs.bullmq.io) (requires Redis with `noeviction` policy)
 - **Validation**: [Zod v4](https://zod.dev)
@@ -32,15 +32,11 @@ bun add @last-shot-labs/bunshot
 ```ts
 // src/index.ts
 import { createServer } from "@last-shot-labs/bunshot";
-import { websocket } from "./ws";
-
-const appName = "My App";
 
 await createServer({
   routesDir: import.meta.dir + "/routes",
   workersDir: import.meta.dir + "/workers",
-  app: { name: appName, version: "1.0.0" },
-  ws: { handler: websocket },
+  app: { name: "My App", version: "1.0.0" },
   // db: { mongo: "single", redis: true } — defaults, connects automatically
 });
 ```
@@ -89,7 +85,7 @@ router.openapi(
     },
   }),
   async (c) => {
-    const userId = c.get("userId");
+    const userId = c.get("authUserId");
     return c.json({ items: [] }, 200);
   }
 );
@@ -255,7 +251,7 @@ The `/ws` endpoint is mounted automatically by `createServer`. No extra setup ne
 
 | What | Default |
 |---|---|
-| Upgrade / auth | Reads `auth-token` cookie → verifies JWT → checks Redis session → sets `ws.data.userId` |
+| Upgrade / auth | Reads `auth-token` cookie → verifies JWT → checks session → sets `ws.data.userId` |
 | `open` | Logs connection, sends `{ event: "connected", id }` |
 | `message` | Handles room actions (see below), echoes everything else |
 | `close` | Clears `ws.data.rooms`, logs disconnection |
@@ -490,7 +486,7 @@ router.use("/admin", rateLimit({ windowMs: 60_000, max: 10 }));
 
 ## Response Caching
 
-Cache GET responses in Redis or MongoDB and bust them from mutation endpoints. The cache key is automatically namespaced by `appName` (`cache:{appName}:{key}`), so shared instances across tenant apps never collide.
+Cache GET responses and bust them from mutation endpoints. Supports Redis, MongoDB, SQLite, and memory stores. The cache key is automatically namespaced by `appName` (`cache:{appName}:{key}`), so shared instances across tenant apps never collide.
 
 ### Basic usage
 
@@ -508,7 +504,7 @@ router.get("/products", async (c) => {
   return c.json({ items });
 });
 
-// POST — write data, then bust the shared key (hits both Redis and Mongo)
+// POST — write data, then bust the shared key (hits all connected stores)
 router.post("/products", userAuth, async (c) => {
   const body = await c.req.json();
   await Product.create(body);
@@ -855,7 +851,7 @@ router.use("/dashboard", userAuth, requireVerifiedEmail);       // returns 403 i
 
 ### Custom auth adapter
 
-By default, `/auth/*` routes store users in MongoDB via `mongoAuthAdapter`. Pass `authAdapter` to `createServer` to use any other store — Postgres, SQLite, an external service, etc.
+By default, `/auth/*` routes store users in MongoDB via `mongoAuthAdapter`. Pass `auth: { adapter: myAdapter }` to `createServer` to use any other store — Postgres, SQLite, an external service, etc. Alternatively, use `db.auth` to select a built-in adapter (`"mongo"` | `"sqlite"` | `"memory"`).
 
 The schema should include a `roles` column if you plan to use role-based access:
 
@@ -1426,7 +1422,7 @@ import {
 
   // Auth utilities
   signToken, verifyToken,
-  createSession, getSession, deleteSession,
+  createSession, getSession, deleteSession, setSessionStore,
   createVerificationToken, getVerificationToken, deleteVerificationToken,  // email verification tokens
   bustAuthLimit, trackAttempt, isLimited,          // auth rate limiting — use in custom routes or admin unlocks
   buildFingerprint,                                // HTTP fingerprint hash (IP-independent) — use in custom bot detection logic
@@ -1436,6 +1432,7 @@ import {
   setUserRoles, addUserRole, removeUserRole,       // role management
   type AuthAdapter, type OAuthProfile, type OAuthProviderConfig,
   type AuthRateLimitConfig, type BotProtectionConfig, type BotProtectionOptions,
+  type LimitOpts, type RateLimitOptions,
 
   // Middleware
   bearerAuth, identify, userAuth, rateLimit,
@@ -1454,6 +1451,8 @@ import {
   // Types
   type AppEnv, type AppVariables,
   type CreateServerConfig, type CreateAppConfig,
-  type SocketData,
+  type DbConfig, type AppMeta, type AuthConfig, type OAuthConfig, type SecurityConfig,
+  type PrimaryField, type EmailVerificationConfig,
+  type SocketData, type WsConfig,
 } from "@last-shot-labs/bunshot";
 ```
