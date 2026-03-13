@@ -32,3 +32,24 @@ export const getEmailVerificationConfig = () => _emailVerificationConfig;
 
 const DEFAULT_TOKEN_EXPIRY = 60 * 60 * 24; // 24 hours
 export const getTokenExpiry = (): number => _emailVerificationConfig?.tokenExpiry ?? DEFAULT_TOKEN_EXPIRY;
+
+// ---------------------------------------------------------------------------
+// Session policy
+// ---------------------------------------------------------------------------
+
+let _maxSessions = 6;
+let _persistSessionMetadata = true;
+let _includeInactiveSessions = false;
+let _trackLastActive = false;
+
+export const setMaxSessions = (n: number) => { _maxSessions = n; };
+export const getMaxSessions = () => _maxSessions;
+
+export const setPersistSessionMetadata = (v: boolean) => { _persistSessionMetadata = v; };
+export const getPersistSessionMetadata = () => _persistSessionMetadata;
+
+export const setIncludeInactiveSessions = (v: boolean) => { _includeInactiveSessions = v; };
+export const getIncludeInactiveSessions = () => _includeInactiveSessions;
+
+export const setTrackLastActive = (v: boolean) => { _trackLastActive = v; };
+export const getTrackLastActive = () => _trackLastActive;

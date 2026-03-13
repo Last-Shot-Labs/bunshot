@@ -78,9 +78,11 @@ That's it. Your app gets:
 |---|---|
 | `POST /auth/register` | Create account, returns JWT |
 | `POST /auth/login` | Login, returns JWT (includes `emailVerified` when verification is configured) |
-| `POST /auth/logout` | Invalidates session |
+| `POST /auth/logout` | Invalidates the current session only |
 | `GET /auth/me` | Returns current user's `userId`, `email`, `emailVerified`, and `googleLinked` (requires login) |
 | `POST /auth/set-password` | Set or update password (requires login) |
+| `GET /auth/sessions` | List active sessions with metadata — IP, user-agent, timestamps (requires login) |
+| `DELETE /auth/sessions/:sessionId` | Revoke a specific session by ID (requires login) |
 | `POST /auth/verify-email` | Verify email with token (when `emailVerification` is configured) |
 | `POST /auth/resend-verification` | Resend verification email (requires login, when `emailVerification` is configured) |
 | `GET /health` | Health check |
@@ -729,6 +731,12 @@ await createServer({
       resendVerification: { windowMs: 60 * 60 * 1000, max: 3  }, // default: 3 attempts / hour (per user)
       store: "redis",                       // default: "redis" when Redis is enabled, else "memory"
     },
+    sessionPolicy: {                        // optional — session concurrency and metadata
+      maxSessions: 6,                       // default: 6 — max simultaneous sessions per user; oldest evicted when exceeded
+      persistSessionMetadata: true,         // default: true — keep IP/UA/timestamp row after session expires (for device detection)
+      includeInactiveSessions: false,       // default: false — include expired/deleted sessions in GET /auth/sessions
+      trackLastActive: false,               // default: false — update lastActiveAt on every auth'd request (adds one DB write)
+    },
     oauth: {
       providers: { google: { ... }, apple: { ... } }, // omit a provider to disable it
       postRedirect: "/dashboard",           // default: "/"
@@ -791,7 +799,7 @@ await createServer({
 });
 ```
 
-Redis key namespacing: when Redis is used, all keys are prefixed with `appName` (`session:{appName}:{userId}`, `oauth:{appName}:state:{state}`, `cache:{appName}:{key}`) so multiple apps sharing one Redis instance never collide.
+Redis key namespacing: when Redis is used, all keys are prefixed with `appName` (`session:{appName}:{sessionId}`, `usersessions:{appName}:{userId}`, `oauth:{appName}:state:{state}`, `cache:{appName}:{key}`) so multiple apps sharing one Redis instance never collide.
 
 ---
 
@@ -860,7 +868,7 @@ clearMemoryStore();
 
 ## Auth Flow
 
-Sessions are backed by Redis by default (`session:{appName}:{userId}`). Set `db.sessions: "mongo"` to store them in MongoDB instead — useful when running without Redis. See [Running without Redis](#running-without-redis).
+Sessions are backed by Redis by default. Each login creates an independent session keyed by a UUID (`session:{appName}:{sessionId}`), so multiple devices / tabs can be logged in simultaneously. Set `db.sessions: "mongo"` to store them in MongoDB instead — useful when running without Redis. See [Running without Redis](#running-without-redis).
 
 ### Browser clients
 1. `POST /auth/login` → JWT set as HttpOnly cookie automatically
@@ -869,6 +877,20 @@ Sessions are backed by Redis by default (`session:{appName}:{userId}`). Set `db.
 ### API / non-browser clients
 1. `POST /auth/login` → read `token` from response body
 2. Send `x-user-token: <token>` header on every request
+
+### Session management
+
+Each login creates an independent session so multiple devices stay logged in simultaneously. The framework enforces a configurable cap (default: 6) — the oldest session is evicted when the limit is exceeded.
+
+```
+GET    /auth/sessions             → [{ sessionId, createdAt, lastActiveAt, expiresAt, ipAddress, userAgent, isActive }]
+DELETE /auth/sessions/:sessionId  → revoke a specific session (other sessions unaffected)
+POST   /auth/logout               → revoke only the current session
+```
+
+Session metadata (IP address, user-agent, timestamps) is persisted even after a session expires when `sessionPolicy.persistSessionMetadata: true` (default). This enables tenant apps to detect logins from novel devices or locations and prompt for MFA or send a security alert.
+
+Set `sessionPolicy.includeInactiveSessions: true` to surface expired/deleted sessions in `GET /auth/sessions` with `isActive: false` — useful for a full device-history UI similar to Google or Meta's account security page.
 
 ### Protecting routes
 
@@ -1454,7 +1476,8 @@ import {
 
   // Auth utilities
   signToken, verifyToken,
-  createSession, getSession, deleteSession, setSessionStore,
+  createSession, getSession, deleteSession, getUserSessions, getActiveSessionCount,
+  evictOldestSession, updateSessionLastActive, setSessionStore,
   createVerificationToken, getVerificationToken, deleteVerificationToken,  // email verification tokens
   bustAuthLimit, trackAttempt, isLimited,          // auth rate limiting — use in custom routes or admin unlocks
   buildFingerprint,                                // HTTP fingerprint hash (IP-independent) — use in custom bot detection logic

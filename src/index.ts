@@ -16,7 +16,8 @@ export { connectMongo, connectAuthMongo, connectAppMongo, disconnectMongo, authC
 export { connectRedis, disconnectRedis, getRedis } from "@lib/redis";
 export { createQueue, createWorker } from "@lib/queue";
 export type { Job } from "@lib/queue";
-export { createSession, getSession, deleteSession, setSessionStore } from "@lib/session";
+export { createSession, getSession, deleteSession, getUserSessions, getActiveSessionCount, evictOldestSession, updateSessionLastActive, setSessionStore } from "@lib/session";
+export type { SessionMetadata, SessionInfo } from "@lib/session";
 export { createVerificationToken, getVerificationToken, deleteVerificationToken } from "@lib/emailVerification";
 export { bustAuthLimit, trackAttempt, isLimited } from "@lib/authRateLimit";
 export type { LimitOpts } from "@lib/authRateLimit";

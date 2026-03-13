@@ -11,6 +11,7 @@ import { createRouter } from "@lib/context";
 import { getVerificationToken, deleteVerificationToken, createVerificationToken } from "@lib/emailVerification";
 import type { PrimaryField, EmailVerificationConfig } from "@lib/appConfig";
 import type { AuthRateLimitConfig } from "../app";
+import { getUserSessions, deleteSession } from "@lib/session";
 
 const isProd = process.env.NODE_ENV === "production";
 const TokenResponse = z.object({ token: z.string(), emailVerified: z.boolean().optional() });
@@ -64,7 +65,11 @@ export const createAuthRouter = ({ primaryField, emailVerification, rateLimit }:
       }
       const body = c.req.valid("json") as Record<string, string>;
       const identifier = body[primaryField];
-      const token = await AuthService.register(identifier, body.password);
+      const metadata = {
+        ipAddress: c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? undefined,
+        userAgent: c.req.header("user-agent") ?? undefined,
+      };
+      const token = await AuthService.register(identifier, body.password, metadata);
       setCookie(c, COOKIE_TOKEN, token, cookieOptions);
       return c.json({ token }, 201);
     }
@@ -90,8 +95,12 @@ export const createAuthRouter = ({ primaryField, emailVerification, rateLimit }:
       if (await isLimited(limitKey, loginOpts)) {
         return c.json({ error: "Too many failed login attempts. Try again later." }, 429);
       }
+      const metadata = {
+        ipAddress: c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? undefined,
+        userAgent: c.req.header("user-agent") ?? undefined,
+      };
       try {
-        const result = await AuthService.login(identifier, body.password);
+        const result = await AuthService.login(identifier, body.password, metadata);
         await bustAuthLimit(limitKey); // success — clear failure count
         setCookie(c, COOKIE_TOKEN, result.token, cookieOptions);
         return c.json(result, 200);
@@ -241,6 +250,66 @@ export const createAuthRouter = ({ primaryField, emailVerification, rateLimit }:
       }
     );
   }
+
+  // ---------------------------------------------------------------------------
+  // Session management
+  // ---------------------------------------------------------------------------
+
+  const SessionInfoSchema = z.object({
+    sessionId:    z.string(),
+    createdAt:    z.number(),
+    lastActiveAt: z.number(),
+    expiresAt:    z.number(),
+    ipAddress:    z.string().optional(),
+    userAgent:    z.string().optional(),
+    isActive:     z.boolean(),
+  });
+
+  router.use("/auth/sessions", userAuth);
+  router.use("/auth/sessions/*", userAuth);
+
+  router.openapi(
+    createRoute({
+      method: "get",
+      path: "/auth/sessions",
+      tags,
+      responses: {
+        200: {
+          content: { "application/json": { schema: z.object({ sessions: z.array(SessionInfoSchema) }) } },
+          description: "List of sessions for the current user",
+        },
+        401: { content: { "application/json": { schema: ErrorResponse } }, description: "Unauthorized" },
+      },
+    }),
+    async (c) => {
+      const userId = c.get("authUserId")!;
+      const sessions = await getUserSessions(userId);
+      return c.json({ sessions }, 200);
+    }
+  );
+
+  router.openapi(
+    createRoute({
+      method: "delete",
+      path: "/auth/sessions/{sessionId}",
+      tags,
+      request: { params: z.object({ sessionId: z.string() }) },
+      responses: {
+        200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Session revoked" },
+        401: { content: { "application/json": { schema: ErrorResponse } }, description: "Unauthorized" },
+        404: { content: { "application/json": { schema: ErrorResponse } }, description: "Session not found" },
+      },
+    }),
+    async (c) => {
+      const userId = c.get("authUserId")!;
+      const { sessionId } = c.req.valid("param");
+      const sessions = await getUserSessions(userId);
+      const session = sessions.find((s) => s.sessionId === sessionId);
+      if (!session) return c.json({ error: "Session not found" }, 404);
+      await deleteSession(sessionId);
+      return c.json({ message: "Session revoked" }, 200);
+    }
+  );
 
   return router;
 };

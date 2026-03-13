@@ -3,6 +3,7 @@ import { OpenAPIHono, type Hook } from "@hono/zod-openapi";
 export type AppVariables = {
   authUserId: string | null;
   roles: string[] | null;
+  sessionId: string | null;
 };
 
 export type AppEnv = { Variables: AppVariables };

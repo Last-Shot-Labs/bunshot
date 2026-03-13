@@ -19,8 +19,11 @@ export const createWsUpgradeHandler = (server: Server<BaseSocketData>) =>
         ?.match(new RegExp(`(?:^|;\\s*)${COOKIE_TOKEN}=([^;]+)`))?.[1] ?? null;
       if (token) {
         const payload = await verifyToken(token);
-        const stored = await getSession(payload.sub!);
-        if (stored === token) userId = payload.sub!;
+        const sessionId = payload.sid as string | undefined;
+        if (sessionId) {
+          const stored = await getSession(sessionId);
+          if (stored === token) userId = payload.sub!;
+        }
       }
     } catch { /* unauthenticated — userId stays null */ }
 

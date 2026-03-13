@@ -35,11 +35,19 @@ function initSchema(db: Database): void {
   )`);
   // Add emailVerified to pre-existing databases that lack the column
   try { db.run("ALTER TABLE users ADD COLUMN emailVerified INTEGER NOT NULL DEFAULT 0"); } catch { /* already exists */ }
+  // Migrate legacy sessions table (userId PK) to new multi-session schema (sessionId PK)
+  try { db.run("ALTER TABLE sessions RENAME TO sessions_legacy"); } catch { /* already migrated */ }
   db.run(`CREATE TABLE IF NOT EXISTS sessions (
-    userId    TEXT PRIMARY KEY,
-    token     TEXT NOT NULL,
-    expiresAt INTEGER NOT NULL
+    sessionId    TEXT PRIMARY KEY,
+    userId       TEXT NOT NULL,
+    token        TEXT,
+    createdAt    INTEGER NOT NULL,
+    lastActiveAt INTEGER NOT NULL,
+    expiresAt    INTEGER NOT NULL,
+    ipAddress    TEXT,
+    userAgent    TEXT
   )`);
+  db.run("CREATE INDEX IF NOT EXISTS idx_sessions_userId ON sessions(userId)");
   db.run(`CREATE TABLE IF NOT EXISTS oauth_states (
     state        TEXT PRIMARY KEY,
     codeVerifier TEXT,
@@ -202,25 +210,82 @@ export const sqliteAuthAdapter: AuthAdapter = {
 // Session helpers (used by src/lib/session.ts)
 // ---------------------------------------------------------------------------
 
+import type { SessionMetadata, SessionInfo } from "@lib/session";
+import { getPersistSessionMetadata, getIncludeInactiveSessions } from "@lib/appConfig";
+
 const SESSION_TTL_MS = 60 * 60 * 24 * 7 * 1000; // 7 days
 
-export const sqliteCreateSession = (userId: string, token: string): void => {
-  const expiresAt = Date.now() + SESSION_TTL_MS;
+export const sqliteCreateSession = (userId: string, token: string, sessionId: string, metadata?: SessionMetadata): void => {
+  const now = Date.now();
+  const expiresAt = now + SESSION_TTL_MS;
   getDb().run(
-    "INSERT INTO sessions (userId, token, expiresAt) VALUES (?, ?, ?) ON CONFLICT(userId) DO UPDATE SET token = excluded.token, expiresAt = excluded.expiresAt",
-    [userId, token, expiresAt]
+    "INSERT INTO sessions (sessionId, userId, token, createdAt, lastActiveAt, expiresAt, ipAddress, userAgent) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    [sessionId, userId, token, now, now, expiresAt, metadata?.ipAddress ?? null, metadata?.userAgent ?? null]
   );
 };
 
-export const sqliteGetSession = (userId: string): string | null => {
-  const row = getDb().query<{ token: string }, [string, number]>(
-    "SELECT token FROM sessions WHERE userId = ? AND expiresAt > ?"
-  ).get(userId, Date.now());
-  return row?.token ?? null;
+export const sqliteGetSession = (sessionId: string): string | null => {
+  const row = getDb().query<{ token: string | null }, [string, number]>(
+    "SELECT token FROM sessions WHERE sessionId = ? AND expiresAt > ?"
+  ).get(sessionId, Date.now());
+  if (!row || !row.token) return null;
+  return row.token;
 };
 
-export const sqliteDeleteSession = (userId: string): void => {
-  getDb().run("DELETE FROM sessions WHERE userId = ?", [userId]);
+export const sqliteDeleteSession = (sessionId: string): void => {
+  if (getPersistSessionMetadata()) {
+    getDb().run("UPDATE sessions SET token = NULL WHERE sessionId = ?", [sessionId]);
+  } else {
+    getDb().run("DELETE FROM sessions WHERE sessionId = ?", [sessionId]);
+  }
+};
+
+export const sqliteGetUserSessions = (userId: string): SessionInfo[] => {
+  const now = Date.now();
+  const rows = getDb().query<{
+    sessionId: string; createdAt: number; lastActiveAt: number; expiresAt: number;
+    token: string | null; ipAddress: string | null; userAgent: string | null;
+  }, [string]>(
+    "SELECT sessionId, token, createdAt, lastActiveAt, expiresAt, ipAddress, userAgent FROM sessions WHERE userId = ? ORDER BY createdAt ASC"
+  ).all(userId);
+
+  const includeInactive = getIncludeInactiveSessions();
+  const persist = getPersistSessionMetadata();
+  const results: SessionInfo[] = [];
+  for (const row of rows) {
+    const isActive = !!row.token && row.expiresAt > now;
+    if (!isActive && !persist) continue;
+    if (!isActive && !includeInactive) continue;
+    results.push({
+      sessionId: row.sessionId,
+      createdAt: row.createdAt,
+      lastActiveAt: row.lastActiveAt,
+      expiresAt: row.expiresAt,
+      ipAddress: row.ipAddress ?? undefined,
+      userAgent: row.userAgent ?? undefined,
+      isActive,
+    });
+  }
+  return results;
+};
+
+export const sqliteGetActiveSessionCount = (userId: string): number => {
+  const row = getDb().query<{ count: number }, [string, number]>(
+    "SELECT COUNT(*) AS count FROM sessions WHERE userId = ? AND token IS NOT NULL AND expiresAt > ?"
+  ).get(userId, Date.now());
+  return row?.count ?? 0;
+};
+
+export const sqliteEvictOldestSession = (userId: string): void => {
+  const now = Date.now();
+  const oldest = getDb().query<{ sessionId: string }, [string, number]>(
+    "SELECT sessionId FROM sessions WHERE userId = ? AND token IS NOT NULL AND expiresAt > ? ORDER BY createdAt ASC LIMIT 1"
+  ).get(userId, now);
+  if (oldest) sqliteDeleteSession(oldest.sessionId);
+};
+
+export const sqliteUpdateSessionLastActive = (sessionId: string): void => {
+  getDb().run("UPDATE sessions SET lastActiveAt = ? WHERE sessionId = ?", [Date.now(), sessionId]);
 };
 
 // ---------------------------------------------------------------------------
@@ -310,7 +375,12 @@ export const startSqliteCleanup = (intervalMs = 3_600_000): ReturnType<typeof se
   return setInterval(() => {
     const db = getDb();
     const now = Date.now();
-    db.run("DELETE FROM sessions WHERE expiresAt <= ?", [now]);
+    if (getPersistSessionMetadata()) {
+      // Null out tokens for expired sessions but keep the metadata row
+      db.run("UPDATE sessions SET token = NULL WHERE expiresAt <= ? AND token IS NOT NULL", [now]);
+    } else {
+      db.run("DELETE FROM sessions WHERE expiresAt <= ?", [now]);
+    }
     db.run("DELETE FROM oauth_states WHERE expiresAt <= ?", [now]);
     db.run("DELETE FROM cache_entries WHERE expiresAt IS NOT NULL AND expiresAt <= ?", [now]);
     db.run("DELETE FROM email_verifications WHERE expiresAt <= ?", [now]);

@@ -5,8 +5,8 @@ const secret = new TextEncoder().encode(
   isProd ? process.env.JWT_SECRET_PROD! : process.env.JWT_SECRET_DEV!
 );
 
-export const signToken = async (userId: string): Promise<string> =>
-  new SignJWT({ sub: userId })
+export const signToken = async (userId: string, sessionId: string): Promise<string> =>
+  new SignJWT({ sub: userId, sid: sessionId })
     .setProtectedHeader({ alg: "HS256" })
     .setExpirationTime("7d")
     .sign(secret);
