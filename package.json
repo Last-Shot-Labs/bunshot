@@ -42,7 +42,7 @@
     "@scalar/hono-api-reference": "0.10.0",
     "arctic": "^3.7.0",
     "bullmq": "^5.70.4",
-    "hono": "4.12.5",
+    "hono": "4.12.7",
     "ioredis": "5.10.0",
     "jose": "6.2.0",
     "mongoose": "9.2.4",
