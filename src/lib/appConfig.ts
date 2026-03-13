@@ -42,7 +42,7 @@ let _persistSessionMetadata = true;
 let _includeInactiveSessions = false;
 let _trackLastActive = false;
 
-export const setMaxSessions = (n: number) => { _maxSessions = n; };
+export const setMaxSessions = (n: number) => { _maxSessions = Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1; };
 export const getMaxSessions = () => _maxSessions;
 
 export const setPersistSessionMetadata = (v: boolean) => { _persistSessionMetadata = v; };

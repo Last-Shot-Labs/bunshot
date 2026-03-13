@@ -30,7 +30,9 @@ export const identify: MiddlewareHandler<AppEnv> = async (c, next) => {
           c.set("sessionId", sessionId);
           log(`[identify] authUserId=${payload.sub} sessionId=${sessionId}`);
           if (getTrackLastActive()) {
-            await updateSessionLastActive(sessionId);
+            updateSessionLastActive(sessionId).catch(() => {
+              log(`[identify] failed to update lastActiveAt for sessionId=${sessionId}`);
+            });
           }
         } else {
           log("[identify] token/session mismatch — unauthenticated");

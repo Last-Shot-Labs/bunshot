@@ -70,8 +70,13 @@ const sessionSchema = new Schema<SessionDoc>(
 );
 
 function getSessionModel() {
-  return appConnection.models["Session"] ??
-    appConnection.model<SessionDoc>("Session", sessionSchema);
+  if (appConnection.models["Session"]) return appConnection.models["Session"];
+  // Add TTL index only when metadata is not persisted — docs auto-delete at expiresAt.
+  // When persisting, token is nulled (soft-delete) but the row is kept indefinitely.
+  if (!getPersistSessionMetadata()) {
+    sessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+  }
+  return appConnection.model<SessionDoc>("Session", sessionSchema);
 }
 
 // ---------------------------------------------------------------------------
@@ -213,7 +218,12 @@ async function redisUpdateSessionLastActive(sessionId: string): Promise<void> {
   if (getPersistSessionMetadata()) {
     await redis.set(redisSessionKey(sessionId), JSON.stringify(rec));
   } else {
-    const ttlRemaining = Math.max(0, Math.floor((rec.expiresAt - Date.now()) / 1000));
+    const now = Date.now();
+    if (rec.expiresAt <= now) {
+      await redisDeleteSession(sessionId);
+      return;
+    }
+    const ttlRemaining = Math.max(1, Math.ceil((rec.expiresAt - now) / 1000));
     await redis.set(redisSessionKey(sessionId), JSON.stringify(rec), "EX", ttlRemaining);
   }
 }
@@ -224,11 +234,14 @@ async function redisUpdateSessionLastActive(sessionId: string): Promise<void> {
 
 async function mongoGetUserSessions(userId: string): Promise<SessionInfo[]> {
   const now = new Date();
-  const docs = await getSessionModel()
-    .find({ userId })
-    .lean();
   const includeInactive = getIncludeInactiveSessions();
   const persist = getPersistSessionMetadata();
+  const query: Record<string, unknown> = { userId };
+  if (!includeInactive) {
+    query.token = { $ne: null };
+    query.expiresAt = { $gt: now };
+  }
+  const docs = await getSessionModel().find(query).lean();
   const results: SessionInfo[] = [];
   for (const doc of docs) {
     const isActive = !!doc.token && doc.expiresAt > now;

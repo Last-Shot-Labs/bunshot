@@ -51,8 +51,9 @@ const finishOAuth = async (
   }
   const sessionId = crypto.randomUUID();
   const token = await signToken(user.id, sessionId);
+  const xff = c.req.header("x-forwarded-for");
   const metadata = {
-    ipAddress: c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? undefined,
+    ipAddress: (xff ? xff.split(",")[0]?.trim() : undefined) ?? c.req.header("x-real-ip") ?? undefined,
     userAgent: c.req.header("user-agent") ?? undefined,
   };
   while (await getActiveSessionCount(user.id) >= getMaxSessions()) {

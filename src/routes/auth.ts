@@ -26,6 +26,9 @@ const cookieOptions = {
   maxAge: 60 * 60 * 24 * 7, // 7 days
 };
 
+const clientIp = (xff: string | undefined | null, xri: string | undefined | null): string | undefined =>
+  (xff ? xff.split(",")[0]?.trim() : undefined) ?? xri ?? undefined;
+
 export interface AuthRouterOptions {
   primaryField: PrimaryField;
   emailVerification?: EmailVerificationConfig;
@@ -59,14 +62,14 @@ export const createAuthRouter = ({ primaryField, emailVerification, rateLimit }:
       },
     }),
     async (c) => {
-      const ip = c.req.header("x-forwarded-for") ?? "unknown";
+      const ip = clientIp(c.req.header("x-forwarded-for"), c.req.header("x-real-ip")) ?? "unknown";
       if (await trackAttempt(`register:${ip}`, registerOpts)) {
         return c.json({ error: "Too many registration attempts. Try again later." }, 429);
       }
       const body = c.req.valid("json") as Record<string, string>;
       const identifier = body[primaryField];
       const metadata = {
-        ipAddress: c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? undefined,
+        ipAddress: ip !== "unknown" ? ip : undefined,
         userAgent: c.req.header("user-agent") ?? undefined,
       };
       const token = await AuthService.register(identifier, body.password, metadata);
@@ -96,7 +99,7 @@ export const createAuthRouter = ({ primaryField, emailVerification, rateLimit }:
         return c.json({ error: "Too many failed login attempts. Try again later." }, 429);
       }
       const metadata = {
-        ipAddress: c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? undefined,
+        ipAddress: clientIp(c.req.header("x-forwarded-for"), c.req.header("x-real-ip")),
         userAgent: c.req.header("user-agent") ?? undefined,
       };
       try {
