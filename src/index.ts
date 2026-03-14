@@ -1,7 +1,7 @@
 // App factory
 export { createApp } from "./app";
 export { createServer } from "./server";
-export type { CreateAppConfig, DbConfig, AppMeta, AuthConfig, AuthRateLimitConfig, OAuthConfig, SecurityConfig, BotProtectionConfig, PrimaryField, EmailVerificationConfig } from "./app";
+export type { CreateAppConfig, DbConfig, AppMeta, AuthConfig, AuthRateLimitConfig, OAuthConfig, SecurityConfig, BotProtectionConfig, PrimaryField, EmailVerificationConfig, PasswordResetConfig } from "./app";
 export type { CreateServerConfig, WsConfig } from "./server";
 
 // Lib utilities
@@ -19,6 +19,7 @@ export type { Job } from "@lib/queue";
 export { createSession, getSession, deleteSession, getUserSessions, getActiveSessionCount, evictOldestSession, updateSessionLastActive, setSessionStore } from "@lib/session";
 export type { SessionMetadata, SessionInfo } from "@lib/session";
 export { createVerificationToken, getVerificationToken, deleteVerificationToken } from "@lib/emailVerification";
+export { createResetToken, getResetToken, deleteResetToken, setPasswordResetStore } from "@lib/resetPassword";
 export { bustAuthLimit, trackAttempt, isLimited } from "@lib/authRateLimit";
 export type { LimitOpts } from "@lib/authRateLimit";
 export { validate } from "@lib/validate";

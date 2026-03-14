@@ -65,6 +65,12 @@ function initSchema(db: Database): void {
     email     TEXT NOT NULL,
     expiresAt INTEGER NOT NULL
   )`);
+  db.run(`CREATE TABLE IF NOT EXISTS password_resets (
+    token     TEXT PRIMARY KEY,
+    userId    TEXT NOT NULL,
+    email     TEXT NOT NULL,
+    expiresAt INTEGER NOT NULL
+  )`);
 }
 
 // ---------------------------------------------------------------------------
@@ -368,6 +374,29 @@ export const sqliteDeleteVerificationToken = (token: string): void => {
 };
 
 // ---------------------------------------------------------------------------
+// Password reset token helpers (used by src/lib/resetPassword.ts)
+// ---------------------------------------------------------------------------
+
+export const sqliteCreateResetToken = (token: string, userId: string, email: string, ttlSeconds: number): void => {
+  const expiresAt = Date.now() + ttlSeconds * 1000;
+  getDb().run(
+    "INSERT INTO password_resets (token, userId, email, expiresAt) VALUES (?, ?, ?, ?)",
+    [token, userId, email, expiresAt]
+  );
+};
+
+export const sqliteGetResetToken = (token: string): { userId: string; email: string } | null => {
+  const row = getDb().query<{ userId: string; email: string }, [string, number]>(
+    "SELECT userId, email FROM password_resets WHERE token = ? AND expiresAt > ?"
+  ).get(token, Date.now());
+  return row ?? null;
+};
+
+export const sqliteDeleteResetToken = (token: string): void => {
+  getDb().run("DELETE FROM password_resets WHERE token = ?", [token]);
+};
+
+// ---------------------------------------------------------------------------
 // Optional periodic cleanup of expired rows
 // ---------------------------------------------------------------------------
 
@@ -384,5 +413,6 @@ export const startSqliteCleanup = (intervalMs = 3_600_000): ReturnType<typeof se
     db.run("DELETE FROM oauth_states WHERE expiresAt <= ?", [now]);
     db.run("DELETE FROM cache_entries WHERE expiresAt IS NOT NULL AND expiresAt <= ?", [now]);
     db.run("DELETE FROM email_verifications WHERE expiresAt <= ?", [now]);
+    db.run("DELETE FROM password_resets WHERE expiresAt <= ?", [now]);
   }, intervalMs);
 };
