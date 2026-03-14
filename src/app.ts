@@ -407,14 +407,16 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
     const pathArray = paths ? (Array.isArray(paths) ? paths : [paths]) : [];
 
     for (const entry of pathArray) {
+      // Normalize to forward slashes so splitting works on both Windows and Unix.
+      const normalized = entry.replaceAll("\\", "/");
       // Split glob patterns: everything before the first wildcard segment is the cwd.
       let cwd: string;
       let pattern: string;
-      if (!entry.includes("*")) {
-        cwd = entry;
+      if (!normalized.includes("*")) {
+        cwd = normalized;
         pattern = "**/*.ts";
       } else {
-        const parts = entry.split("/");
+        const parts = normalized.split("/");
         const starIdx = parts.findIndex((p) => p.includes("*"));
         cwd = parts.slice(0, starIdx).join("/");
         pattern = parts.slice(starIdx).join("/");
