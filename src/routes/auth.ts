@@ -21,8 +21,8 @@ const TokenResponse = z.object({
   email: z.string().optional().describe("User's email address (present when primaryField is 'email')."),
   emailVerified: z.boolean().optional().describe("Whether the email address has been verified (present when emailVerification is configured)."),
   googleLinked: z.boolean().optional().describe("Whether a Google OAuth account is linked to this user."),
-});
-const ErrorResponse = z.object({ error: z.string() });
+}).openapi("TokenResponse");
+const ErrorResponse = z.object({ error: z.string().describe("Human-readable error message.") }).openapi("ErrorResponse");
 const tags = ["Auth"];
 
 const cookieOptions = {
@@ -389,7 +389,7 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
     ipAddress:    z.string().optional().describe("IP address of the client at session creation."),
     userAgent:    z.string().optional().describe("User-agent string of the client at session creation."),
     isActive:     z.boolean().describe("Whether the session is currently valid and unexpired."),
-  });
+  }).openapi("SessionInfo");
 
   router.use("/auth/sessions", userAuth);
   router.use("/auth/sessions/*", userAuth);
