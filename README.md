@@ -241,17 +241,30 @@ await createServer({
 
 Import `appConnection` and register models on it. This ensures your models use the correct connection whether you're on a single DB or a separate tenant DB.
 
+`appConnection` is a lazy proxy — calling `.model()` at the top level works fine even before `connectMongo()` has been called. Mongoose buffers any queries until the connection is established.
+
 ```ts
 // src/models/Product.ts
-import { appConnection, mongoose } from "@lastshotlabs/bunshot";
+import { appConnection } from "@lastshotlabs/bunshot";
+import { Schema } from "mongoose";
+import type { HydratedDocument } from "mongoose";
 
-const ProductSchema = new mongoose.Schema({
+interface IProduct {
+  name: string;
+  price: number;
+}
+
+export type ProductDocument = HydratedDocument<IProduct>;
+
+const ProductSchema = new Schema<IProduct>({
   name: { type: String, required: true },
   price: { type: Number, required: true },
 }, { timestamps: true });
 
-export const Product = appConnection.model("Product", ProductSchema);
+export const Product = appConnection.model<IProduct>("Product", ProductSchema);
 ```
+
+> **Note:** Import types (`HydratedDocument`, `Schema`, etc.) directly from `"mongoose"` — the `appConnection` and `mongoose` exports from bunshot are runtime proxies and cannot be used as TypeScript namespaces.
 
 ---
 
