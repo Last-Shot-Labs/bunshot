@@ -268,6 +268,7 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
         request: { body: { content: { "application/json": { schema: z.object({ email: z.string().email() }) } } } },
         responses: {
           200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Reset email sent if address is registered" },
+          400: { content: { "application/json": { schema: ErrorResponse } }, description: "Validation error" },
           429: { content: { "application/json": { schema: ErrorResponse } }, description: "Too many attempts" },
         },
       }),
@@ -281,9 +282,14 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
         const user = await adapter.findByEmail(email);
         // Always return the same message to avoid leaking whether an email is registered
         const msg = { message: "If that email is registered, a password reset link has been sent." };
-        if (!user) return c.json(msg, 200);
-        const token = await createResetToken(user.id, email);
-        await passwordReset.onSend(email, token);
+        if (user) {
+          try {
+            const token = await createResetToken(user.id, email);
+            await passwordReset.onSend(email, token);
+          } catch (err) {
+            console.error("Failed to send password reset email:", err);
+          }
+        }
         return c.json(msg, 200);
       }
     );
@@ -296,7 +302,7 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
         request: { body: { content: { "application/json": { schema: z.object({ token: z.string(), password: z.string().min(8) }) } } } },
         responses: {
           200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Password reset successfully" },
-          400: { content: { "application/json": { schema: ErrorResponse } }, description: "Invalid or expired token" },
+          400: { content: { "application/json": { schema: ErrorResponse } }, description: "Validation error or invalid/expired token" },
           429: { content: { "application/json": { schema: ErrorResponse } }, description: "Too many attempts" },
           501: { content: { "application/json": { schema: ErrorResponse } }, description: "Not supported by adapter" },
         },

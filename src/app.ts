@@ -314,6 +314,10 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
     throw new Error(`createApp: "defaultRole" is set to "${defaultRole}" but the auth adapter does not implement setRoles. Add setRoles to your adapter or remove defaultRole.`);
   }
 
+  if (passwordReset && !authAdapter.setPassword) {
+    throw new Error(`createApp: "passwordReset" is configured but the auth adapter does not implement setPassword. Add setPassword to your adapter or remove passwordReset.`);
+  }
+
   if (oauthProviders) initOAuthProviders(oauthProviders);
   const configuredOAuth = getConfiguredOAuthProviders();
 
