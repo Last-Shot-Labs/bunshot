@@ -331,7 +331,12 @@ export const memoryDeleteVerificationToken = (token: string): void => {
 // ---------------------------------------------------------------------------
 
 export const memoryCreateResetToken = (token: string, userId: string, email: string, ttlSeconds: number): void => {
-  _resetTokens.set(token, { userId, email, expiresAt: Date.now() + ttlSeconds * 1000 });
+  const now = Date.now();
+  // Opportunistically purge expired entries to prevent unbounded memory growth
+  for (const [k, v] of _resetTokens) {
+    if (v.expiresAt <= now) _resetTokens.delete(k);
+  }
+  _resetTokens.set(token, { userId, email, expiresAt: now + ttlSeconds * 1000 });
 };
 
 export const memoryConsumeResetToken = (hash: string): { userId: string; email: string } | null => {

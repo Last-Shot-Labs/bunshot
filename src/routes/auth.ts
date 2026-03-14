@@ -274,14 +274,17 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
       }),
       async (c) => {
         const ip = clientIp(c.req.header("x-forwarded-for"), c.req.header("x-real-ip")) ?? "unknown";
-        if (await trackAttempt(`forgot:${ip}`, forgotOpts)) {
+        const { email } = c.req.valid("json");
+        // Rate-limit by both IP and email to prevent distributed email-bombing
+        const ipLimited    = await trackAttempt(`forgot:ip:${ip}`, forgotOpts);
+        const emailLimited = await trackAttempt(`forgot:email:${email}`, forgotOpts);
+        if (ipLimited || emailLimited) {
           return c.json({ error: "Too many attempts. Try again later." }, 429);
         }
-        const { email } = c.req.valid("json");
         const adapter = getAuthAdapter();
         const user = await adapter.findByEmail(email);
-        // Fire-and-forget: return immediately so both branches take the same time,
-        // preventing email enumeration via response timing.
+        // Fire-and-forget: the response does not wait for token creation or email sending,
+        // which reduces obvious timing differences between registered and unregistered emails.
         const msg = { message: "If that email is registered, a password reset link has been sent." };
         if (user) {
           void (async () => {
