@@ -30,7 +30,11 @@ This is a **Bun + Hono API framework library** that consuming projects install a
 
 **Route auto-discovery:** Consuming projects place routes in a `routes/` directory. The framework scans and registers them automatically. Routes use `@hono/zod-openapi` for type-safe OpenAPI definitions. Load order can be controlled by exporting `export const priority = <number>` from a route file (lower = loaded first; files without it load last).
 
-**OpenAPI schema auto-registration:** Import `createRoute` from `@lastshotlabs/bunshot` (not from `@hono/zod-openapi` directly). The bunshot wrapper automatically calls `.openapi(name)` on any unnamed request body or response schema before passing through to the underlying `createRoute`, so every schema appears as a named component in `components/schemas` rather than being inlined. Generated names follow `{Method}{PathSegments}Body` / `{Method}{PathSegments}{StatusCode}` (e.g. `PostLedgerItemsBody`, `GetLedgerItemsById200`). Schemas already named via `.openapi("Name")` are never overwritten. Implementation: `src/lib/createRoute.ts`.
+**OpenAPI schema auto-registration:** Import `createRoute` from `@lastshotlabs/bunshot` (not from `@hono/zod-openapi` directly). The wrapper auto-registers every unnamed request body / response schema as a named `components/schemas` entry by writing directly to `zodToOpenAPIRegistry` (bypasses `.openapi()` prototype dependency). HTTP methods map to action verbs (`post→Create`, `patch→Update`, `put→Replace`, `delete→Delete`, `get→Get`); request bodies get a `Request` suffix; response status codes map to semantic suffixes (`200/201/204→Response`, `400→BadRequestError`, `401→UnauthorizedError`, `403→ForbiddenError`, `404→NotFoundError`, `409→ConflictError`, `422→ValidationError`, `429→RateLimitError`, `500→InternalError`, unknown codes fall back to the number). Schemas already registered are never overwritten. Implementation: `src/lib/createRoute.ts`.
+
+**`registerSchema`:** Explicit named registration for shared schemas not attached to a specific route. `registerSchema("Name", schema)` returns the schema unchanged. Works anywhere — inline in route files, in a shared schema file, etc. Exported from the package.
+
+**`withSecurity`:** Adds OpenAPI `security` requirements to a route after `createRoute` has inferred its generic type parameter. Inlining `security: [...]` inside `createRoute({...})` breaks `c.req.valid()` inference (TypeScript collapses `InputTypeJson<R>` to `never`). Usage: `withSecurity(createRoute({...}), { cookieAuth: [] }, { userToken: [] })`. Exported from the package.
 
 **Worker auto-discovery:** BullMQ workers are placed in a `workers/` directory and auto-started by `createServer`.
 
@@ -52,7 +56,7 @@ This is a **Bun + Hono API framework library** that consuming projects install a
 | `rateLimit.ts` | Per-key rate limiting; exports `trackAttempt`, `isLimited`, `bustAuthLimit` for use in custom routes |
 | `resetPassword.ts` | Password reset token CRUD — `createResetToken`, `consumeResetToken`; 4-backend (redis/mongo/sqlite/memory); store set via `setPasswordResetStore` |
 | `ws.ts` | WebSocket room registry, pub/sub helpers (`publish`, `subscribe`, `unsubscribe`, `getSubscriptions`, `handleRoomActions`, `getRooms`, `getRoomSubscribers`) — in-memory, no DB dependency |
-| `createRoute.ts` | Wraps `@hono/zod-openapi`'s `createRoute` to auto-register unnamed request/response schemas as named OpenAPI components; re-exported as the primary `createRoute` from the package |
+| `createRoute.ts` | Wraps `@hono/zod-openapi`'s `createRoute` to auto-register unnamed request/response schemas as named OpenAPI components; also exports `withSecurity` (adds security after type inference) and `registerSchema` (explicit named registration); all three re-exported from the package |
 
 ### Middleware (`src/middleware/`)
 

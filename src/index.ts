@@ -13,7 +13,7 @@ export { getAppRoles } from "@lib/appConfig";
 export { HttpError } from "@lib/HttpError";
 export { COOKIE_TOKEN, HEADER_USER_TOKEN } from "@lib/constants";
 export { createRouter } from "@lib/context";
-export { createRoute, withSecurity } from "@lib/createRoute";
+export { createRoute, withSecurity, registerSchema } from "@lib/createRoute";
 export type { AppEnv, AppVariables } from "@lib/context";
 export { signToken, verifyToken } from "@lib/jwt";
 export { log } from "@lib/logger";

@@ -3,15 +3,39 @@ import { getRefId, zodToOpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import type { RouteConfig } from "@hono/zod-openapi";
 import type { ZodType } from "zod";
 
+const STATUS_SUFFIX: Record<string, string> = {
+  "200": "Response",
+  "201": "Response",
+  "204": "Response",
+  "400": "BadRequestError",
+  "401": "UnauthorizedError",
+  "403": "ForbiddenError",
+  "404": "NotFoundError",
+  "409": "ConflictError",
+  "422": "ValidationError",
+  "429": "RateLimitError",
+  "500": "InternalError",
+  "501": "NotImplementedError",
+  "503": "UnavailableError",
+};
+
+const METHOD_VERB: Record<string, string> = {
+  get: "Get",
+  post: "Create",
+  put: "Replace",
+  patch: "Update",
+  delete: "Delete",
+};
+
 /**
  * Converts a route method + path into a PascalCase base name for auto-generated schema names.
  * Examples:
- *   POST /ledger-items       → PostLedgerItems
+ *   POST /ledger-items       → CreateLedgerItems
  *   GET  /ledger-items/{id}  → GetLedgerItemsById
  *   DELETE /auth/sessions/{sessionId} → DeleteAuthSessionsBySessionId
  */
 function toBaseName(method: string, path: string): string {
-  const m = method.charAt(0).toUpperCase() + method.slice(1).toLowerCase();
+  const m = METHOD_VERB[method.toLowerCase()] ?? (method.charAt(0).toUpperCase() + method.slice(1).toLowerCase());
   const segments = path
     .split("/")
     .filter(Boolean)
@@ -34,6 +58,23 @@ function maybeRegister(schema: unknown, name: string): void {
   // same zod instance that created the schema, which isn't guaranteed in tenant apps.
   zodToOpenAPIRegistry.add(schema as any, { _internal: { refId: name } } as any);
 }
+
+/**
+ * Registers a Zod schema as a named entry in `components/schemas`.
+ *
+ * Use this for shared schemas (e.g. shared error types, reusable response shapes)
+ * that aren't directly attached to a specific route. Schemas already registered
+ * under the same name are silently skipped.
+ *
+ * @example
+ * export const MySchema = registerSchema("MySchema", z.object({ id: z.string() }));
+ */
+export const registerSchema = <T extends ZodType>(name: string, schema: T): T => {
+  if (!getRefId(schema)) {
+    zodToOpenAPIRegistry.add(schema as any, { _internal: { refId: name } } as any);
+  }
+  return schema;
+};
 
 /**
  * Adds an OpenAPI `security` requirement to a route without affecting TypeScript
@@ -68,12 +109,12 @@ export const createRoute = <T extends RouteConfig>(config: T): T => {
 
   // Auto-name the JSON request body schema if present and unnamed
   const bodySchema = (config.request as any)?.body?.content?.["application/json"]?.schema;
-  maybeRegister(bodySchema, `${base}Body`);
+  maybeRegister(bodySchema, `${base}Request`);
 
   // Auto-name each JSON response schema if present and unnamed
   for (const [status, response] of Object.entries(config.responses ?? {})) {
     const resSchema = (response as any)?.content?.["application/json"]?.schema;
-    maybeRegister(resSchema, `${base}${status}`);
+    maybeRegister(resSchema, `${base}${STATUS_SUFFIX[status] ?? status}`);
   }
 
   return _createRoute(config);

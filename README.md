@@ -177,7 +177,60 @@ routes/
     detail.ts
 ```
 
-**OpenAPI schema components:** Import `createRoute` from `@lastshotlabs/bunshot` (not from `@hono/zod-openapi`). The bunshot wrapper automatically registers all unnamed request body and response schemas as named entries in `components/schemas`, so the spec stays clean and code-gen tools can produce reusable types. Generated names follow the pattern `{Method}{Path}Body` / `{Method}{Path}{StatusCode}` (e.g. `PostProductsBody`, `GetProductsById200`). Schemas you explicitly name via `.openapi("MyName")` are never overwritten.
+### OpenAPI Schema Registration
+
+Import `createRoute` from `@lastshotlabs/bunshot` (not from `@hono/zod-openapi`). The wrapper automatically registers every unnamed request body and response schema as a named entry in `components/schemas`. Schemas you already named via `registerSchema` are never overwritten.
+
+**Naming convention**
+
+| Route | Part | Generated name |
+|-------|------|----------------|
+| `POST /products` | request body | `CreateProductsRequest` |
+| `POST /products` | 201 response | `CreateProductsResponse` |
+| `GET /products/{id}` | 200 response | `GetProductsByIdResponse` |
+| `DELETE /products/{id}` | 404 response | `DeleteProductsByIdNotFoundError` |
+| `PATCH /products/{id}` | request body | `UpdateProductsByIdRequest` |
+
+HTTP methods map to action verbs: `GET → Get`, `POST → Create`, `PUT → Replace`, `PATCH → Update`, `DELETE → Delete`.
+
+Status codes map to semantic suffixes: `200/201/204 → Response`, `400 → BadRequestError`, `401 → UnauthorizedError`, `403 → ForbiddenError`, `404 → NotFoundError`, `409 → ConflictError`, `422 → ValidationError`, `429 → RateLimitError`, `500 → InternalError`, `501 → NotImplementedError`, `503 → UnavailableError`. Unknown codes fall back to the number.
+
+**Explicit registration**
+
+Use `registerSchema` to name a shared schema that isn't tied to a specific route — for example a common error envelope reused across many routes:
+
+```ts
+import { registerSchema } from "@lastshotlabs/bunshot";
+import { z } from "zod";
+
+// Returns the schema as-is, so you can export and use it normally.
+export const ErrorResponse = registerSchema("ErrorResponse",
+  z.object({ error: z.string() })
+);
+```
+
+Call it anywhere a file is imported before the spec is served — inline in a route file, in a shared `src/schemas/common.ts`, etc. Route files are auto-discovered, so any top-level `registerSchema` call in a route file runs automatically.
+
+**Protected routes**
+
+Use `withSecurity` to declare security schemes on a route without breaking `c.req.valid()` type inference. (Inlining `security` directly in `createRoute({...})` causes TypeScript to collapse the handler's input types to `never`.)
+
+```ts
+import { createRoute, withSecurity } from "@lastshotlabs/bunshot";
+
+router.openapi(
+  withSecurity(
+    createRoute({ method: "get", path: "/me", ... }),
+    { cookieAuth: [] },
+    { userToken: [] }
+  ),
+  async (c) => {
+    const userId = c.get("authUserId"); // fully typed
+  }
+);
+```
+
+Pass each security scheme as a separate object argument. The security scheme names (`cookieAuth`, `userToken`, `bearerAuth`) are registered globally by `createApp`.
 
 **Load order:** By default, routes load in filesystem order. If a route needs to be registered before another (e.g. for Hono's first-match-wins routing), export a `priority` number — lower values load first. Routes without a `priority` load last.
 
