@@ -44,11 +44,11 @@
     "jose": "6.2.0"
   },
   "peerDependencies": {
-    "hono": ">=4.12",
-    "zod": ">=4.0",
-    "mongoose": ">=9.0",
-    "ioredis": ">=5.0",
-    "bullmq": ">=5.0"
+    "hono": ">=4.12 <5",
+    "zod": ">=4.0 <5",
+    "mongoose": ">=9.0 <10",
+    "ioredis": ">=5.0 <6",
+    "bullmq": ">=5.0 <6"
   },
   "peerDependenciesMeta": {
     "mongoose": { "optional": true },
