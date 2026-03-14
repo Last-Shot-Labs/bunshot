@@ -9,7 +9,7 @@ import { isLimited, trackAttempt, bustAuthLimit } from "@lib/authRateLimit";
 import { getAuthAdapter } from "@lib/authAdapter";
 import { createRouter } from "@lib/context";
 import { getVerificationToken, deleteVerificationToken, createVerificationToken } from "@lib/emailVerification";
-import { createResetToken, getResetToken, deleteResetToken } from "@lib/resetPassword";
+import { createResetToken, consumeResetToken } from "@lib/resetPassword";
 import type { PrimaryField, EmailVerificationConfig, PasswordResetConfig } from "@lib/appConfig";
 import type { AuthRateLimitConfig } from "../app";
 import { getUserSessions, deleteSession } from "@lib/session";
@@ -280,15 +280,18 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
         const { email } = c.req.valid("json");
         const adapter = getAuthAdapter();
         const user = await adapter.findByEmail(email);
-        // Always return the same message to avoid leaking whether an email is registered
+        // Fire-and-forget: return immediately so both branches take the same time,
+        // preventing email enumeration via response timing.
         const msg = { message: "If that email is registered, a password reset link has been sent." };
         if (user) {
-          try {
-            const token = await createResetToken(user.id, email);
-            await passwordReset.onSend(email, token);
-          } catch (err) {
-            console.error("Failed to send password reset email:", err);
-          }
+          void (async () => {
+            try {
+              const token = await createResetToken(user.id, email);
+              await passwordReset.onSend(email, token);
+            } catch (err) {
+              console.error("Failed to send password reset email:", err);
+            }
+          })();
         }
         return c.json(msg, 200);
       }
@@ -313,7 +316,8 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
           return c.json({ error: "Too many attempts. Try again later." }, 429);
         }
         const { token, password } = c.req.valid("json");
-        const entry = await getResetToken(token);
+        // consumeResetToken atomically gets and deletes — prevents concurrent replay
+        const entry = await consumeResetToken(token);
         if (!entry) return c.json({ error: "Invalid or expired reset token" }, 400);
         const adapter = getAuthAdapter();
         if (!adapter.setPassword) {
@@ -321,7 +325,6 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
         }
         const passwordHash = await Bun.password.hash(password);
         await adapter.setPassword(entry.userId, passwordHash);
-        await deleteResetToken(token);
         return c.json({ message: "Password reset successfully" }, 200);
       }
     );

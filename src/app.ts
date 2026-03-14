@@ -314,6 +314,14 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
     throw new Error(`createApp: "defaultRole" is set to "${defaultRole}" but the auth adapter does not implement setRoles. Add setRoles to your adapter or remove defaultRole.`);
   }
 
+  if (emailVerification && primaryField !== "email") {
+    throw new Error(`createApp: "emailVerification" is only supported when primaryField is "email". Either set primaryField to "email" or remove emailVerification.`);
+  }
+
+  if (passwordReset && primaryField !== "email") {
+    throw new Error(`createApp: "passwordReset" is only supported when primaryField is "email". Either set primaryField to "email" or remove passwordReset.`);
+  }
+
   if (passwordReset && !authAdapter.setPassword) {
     throw new Error(`createApp: "passwordReset" is configured but the auth adapter does not implement setPassword. Add setPassword to your adapter or remove passwordReset.`);
   }

@@ -385,15 +385,11 @@ export const sqliteCreateResetToken = (token: string, userId: string, email: str
   );
 };
 
-export const sqliteGetResetToken = (token: string): { userId: string; email: string } | null => {
+export const sqliteConsumeResetToken = (hash: string): { userId: string; email: string } | null => {
   const row = getDb().query<{ userId: string; email: string }, [string, number]>(
-    "SELECT userId, email FROM password_resets WHERE token = ? AND expiresAt > ?"
-  ).get(token, Date.now());
+    "DELETE FROM password_resets WHERE token = ? AND expiresAt > ? RETURNING userId, email"
+  ).get(hash, Date.now());
   return row ?? null;
-};
-
-export const sqliteDeleteResetToken = (token: string): void => {
-  getDb().run("DELETE FROM password_resets WHERE token = ?", [token]);
 };
 
 // ---------------------------------------------------------------------------

@@ -334,15 +334,12 @@ export const memoryCreateResetToken = (token: string, userId: string, email: str
   _resetTokens.set(token, { userId, email, expiresAt: Date.now() + ttlSeconds * 1000 });
 };
 
-export const memoryGetResetToken = (token: string): { userId: string; email: string } | null => {
-  const entry = _resetTokens.get(token);
+export const memoryConsumeResetToken = (hash: string): { userId: string; email: string } | null => {
+  const entry = _resetTokens.get(hash);
   if (!entry || entry.expiresAt <= Date.now()) {
-    _resetTokens.delete(token);
+    _resetTokens.delete(hash);
     return null;
   }
+  _resetTokens.delete(hash);
   return { userId: entry.userId, email: entry.email };
-};
-
-export const memoryDeleteResetToken = (token: string): void => {
-  _resetTokens.delete(token);
 };

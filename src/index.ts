@@ -19,7 +19,7 @@ export type { Job } from "@lib/queue";
 export { createSession, getSession, deleteSession, getUserSessions, getActiveSessionCount, evictOldestSession, updateSessionLastActive, setSessionStore } from "@lib/session";
 export type { SessionMetadata, SessionInfo } from "@lib/session";
 export { createVerificationToken, getVerificationToken, deleteVerificationToken } from "@lib/emailVerification";
-export { createResetToken, getResetToken, deleteResetToken, setPasswordResetStore } from "@lib/resetPassword";
+export { createResetToken, consumeResetToken, setPasswordResetStore } from "@lib/resetPassword";
 export { bustAuthLimit, trackAttempt, isLimited } from "@lib/authRateLimit";
 export type { LimitOpts } from "@lib/authRateLimit";
 export { validate } from "@lib/validate";
