@@ -209,12 +209,14 @@ export interface ModelSchemasConfig {
   /**
    * One or more absolute directory paths or glob patterns containing shared Zod schemas.
    * All matching .ts files are imported before routes so schemas are registered first.
+   * Optional when registration is "explicit" — in that case your registerSchema /
+   * registerSchemas calls run at the time each schema file is imported by a route.
    * Examples:
    *   import.meta.dir + "/schemas"
    *   [import.meta.dir + "/schemas", import.meta.dir + "/models"]
    *   import.meta.dir + "/models/**\/*.schema.ts"
    */
-  paths: string | string[];
+  paths?: string | string[];
   /**
    * How schemas found in the files are registered in `components/schemas`.
    * - "auto" (default): exported Zod schemas are registered automatically. The export
@@ -402,7 +404,7 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
       typeof msConfig === "string" || Array.isArray(msConfig)
         ? { paths: msConfig, registration: "auto" as const }
         : msConfig;
-    const pathArray = Array.isArray(paths) ? paths : [paths];
+    const pathArray = paths ? (Array.isArray(paths) ? paths : [paths]) : [];
 
     for (const entry of pathArray) {
       // Split glob patterns: everything before the first wildcard segment is the cwd.
