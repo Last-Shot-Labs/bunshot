@@ -22,6 +22,18 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./mongo": {
+      "import": "./dist/entrypoints/mongo.js",
+      "types": "./dist/entrypoints/mongo.d.ts"
+    },
+    "./redis": {
+      "import": "./dist/entrypoints/redis.js",
+      "types": "./dist/entrypoints/redis.d.ts"
+    },
+    "./queue": {
+      "import": "./dist/entrypoints/queue.js",
+      "types": "./dist/entrypoints/queue.d.ts"
     }
   },
   "bin": {
@@ -60,7 +72,10 @@
     "tsc-alias": "^1.8.16",
     "typescript": "^5.9.3",
     "hono": ">=4.12",
-    "zod": ">=4.0"
+    "zod": ">=4.0",
+    "mongoose": "9.2.4",
+    "ioredis": "5.10.0",
+    "bullmq": "^5.70.4"
   },
   "publishConfig": {
     "access": "public"

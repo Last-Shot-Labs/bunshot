@@ -1,7 +1,7 @@
 // App factory
 export { createApp } from "./app";
 export { createServer } from "./server";
-export type { CreateAppConfig, DbConfig, AppMeta, AuthConfig, AuthRateLimitConfig, OAuthConfig, SecurityConfig, BotProtectionConfig, PrimaryField, EmailVerificationConfig } from "./app";
+export type { CreateAppConfig, DbConfig, AppMeta, AuthConfig, AuthRateLimitConfig, OAuthConfig, SecurityConfig, BotProtectionConfig, PrimaryField, EmailVerificationConfig, PasswordResetConfig } from "./app";
 export type { CreateServerConfig, WsConfig } from "./server";
 
 // Lib utilities
@@ -12,10 +12,7 @@ export { createRouter } from "@lib/context";
 export type { AppEnv, AppVariables } from "@lib/context";
 export { signToken, verifyToken } from "@lib/jwt";
 export { log } from "@lib/logger";
-export { connectMongo, connectAuthMongo, connectAppMongo, disconnectMongo, authConnection, appConnection, mongoose } from "@lib/mongo";
-export { connectRedis, disconnectRedis, getRedis } from "@lib/redis";
-export { createQueue, createWorker } from "@lib/queue";
-export type { Job } from "@lib/queue";
+export { createResetToken, consumeResetToken, setPasswordResetStore } from "@lib/resetPassword";
 export { createSession, getSession, deleteSession, getUserSessions, getActiveSessionCount, evictOldestSession, updateSessionLastActive, setSessionStore } from "@lib/session";
 export type { SessionMetadata, SessionInfo } from "@lib/session";
 export { createVerificationToken, getVerificationToken, deleteVerificationToken } from "@lib/emailVerification";
@@ -39,8 +36,6 @@ export { cacheResponse, bustCache, bustCachePattern, setCacheStore } from "@midd
 export { buildFingerprint } from "@lib/fingerprint";
 
 // Models
-export { AuthUser } from "@models/AuthUser";
-export { mongoAuthAdapter } from "./adapters/mongoAuth";
 export { sqliteAuthAdapter, setSqliteDb, startSqliteCleanup } from "./adapters/sqliteAuth";
 export { memoryAuthAdapter, clearMemoryStore } from "./adapters/memoryAuth";
 export { setUserRoles, addUserRole, removeUserRole } from "@lib/roles";
