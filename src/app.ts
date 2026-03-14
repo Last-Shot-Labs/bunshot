@@ -10,7 +10,7 @@ import { bearerAuth } from "@middleware/bearerAuth";
 import { identify } from "@middleware/identify";
 import type { AppEnv } from "@lib/context";
 import { HEADER_USER_TOKEN } from "@lib/constants";
-import { setAppName, setAppRoles, setDefaultRole, setPrimaryField, setEmailVerificationConfig } from "@lib/appConfig";
+import { setAppName, setAppRoles, setDefaultRole, setPrimaryField, setEmailVerificationConfig, setMaxSessions, setPersistSessionMetadata, setIncludeInactiveSessions, setTrackLastActive } from "@lib/appConfig";
 import type { PrimaryField, EmailVerificationConfig } from "@lib/appConfig";
 import { setEmailVerificationStore } from "@lib/emailVerification";
 import { setAuthRateLimitStore } from "@lib/authRateLimit";
@@ -133,6 +133,28 @@ export interface AuthConfig {
   emailVerification?: EmailVerificationConfig;
   /** Rate limit configuration for built-in auth endpoints. */
   rateLimit?: AuthRateLimitConfig;
+  /** Session concurrency and metadata persistence policy. */
+  sessionPolicy?: AuthSessionPolicyConfig;
+}
+
+export interface AuthSessionPolicyConfig {
+  /** Max simultaneous active sessions per user. Oldest is evicted when exceeded. Default: 6. */
+  maxSessions?: number;
+  /**
+   * Retain session metadata (IP, user-agent, timestamps) after a session expires or is deleted.
+   * Enables future novel-device/location detection. Default: true.
+   */
+  persistSessionMetadata?: boolean;
+  /**
+   * Include inactive (expired/deleted) sessions in GET /auth/sessions.
+   * Only meaningful when persistSessionMetadata is true. Default: false.
+   */
+  includeInactiveSessions?: boolean;
+  /**
+   * Update lastActiveAt on every authenticated request.
+   * Adds one DB write per auth'd request. Default: false.
+   */
+  trackLastActive?: boolean;
 }
 
 export type { PrimaryField, EmailVerificationConfig };
@@ -217,6 +239,7 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
   const primaryField = authConfig.primaryField ?? "email";
   const emailVerification = authConfig.emailVerification;
   const authRateLimit = authConfig.rateLimit;
+  const sessionPolicy = authConfig.sessionPolicy ?? {};
 
   const { sqlite, mongo = "single", redis: enableRedis = true } = db;
 
@@ -268,6 +291,10 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
   setEmailVerificationConfig(emailVerification ?? null);
   setEmailVerificationStore(sessions);
   setAuthRateLimitStore(authRateLimit?.store ?? (enableRedis ? "redis" : "memory"));
+  setMaxSessions(sessionPolicy.maxSessions ?? 6);
+  setPersistSessionMetadata(sessionPolicy.persistSessionMetadata ?? true);
+  setIncludeInactiveSessions(sessionPolicy.includeInactiveSessions ?? false);
+  setTrackLastActive(sessionPolicy.trackLastActive ?? false);
 
   if (defaultRole && !authAdapter.setRoles) {
     throw new Error(`createApp: "defaultRole" is set to "${defaultRole}" but the auth adapter does not implement setRoles. Add setRoles to your adapter or remove defaultRole.`);

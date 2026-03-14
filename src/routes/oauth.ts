@@ -11,10 +11,10 @@ import {
 import { getAuthAdapter } from "@lib/authAdapter";
 import { HttpError } from "@lib/HttpError";
 import { signToken } from "@lib/jwt";
-import { createSession } from "@lib/session";
+import { createSession, getActiveSessionCount, evictOldestSession } from "@lib/session";
 import { COOKIE_TOKEN } from "@lib/constants";
 import { userAuth } from "@middleware/userAuth";
-import { getDefaultRole } from "@lib/appConfig";
+import { getDefaultRole, getMaxSessions } from "@lib/appConfig";
 
 const isProd = process.env.NODE_ENV === "production";
 
@@ -49,8 +49,17 @@ const finishOAuth = async (
     const role = getDefaultRole();
     if (role && adapter.setRoles) await adapter.setRoles(user.id, [role]);
   }
-  const token = await signToken(user.id);
-  await createSession(user.id, token);
+  const sessionId = crypto.randomUUID();
+  const token = await signToken(user.id, sessionId);
+  const xff = c.req.header("x-forwarded-for");
+  const metadata = {
+    ipAddress: (xff ? xff.split(",")[0]?.trim() : undefined) ?? c.req.header("x-real-ip") ?? undefined,
+    userAgent: c.req.header("user-agent") ?? undefined,
+  };
+  while (await getActiveSessionCount(user.id) >= getMaxSessions()) {
+    await evictOldestSession(user.id);
+  }
+  await createSession(user.id, token, sessionId, metadata);
   setCookie(c, COOKIE_TOKEN, token, cookieOptions);
 
   // Append token to redirect so non-browser clients (mobile deep links) can extract it.

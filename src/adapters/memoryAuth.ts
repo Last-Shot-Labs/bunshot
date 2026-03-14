@@ -1,5 +1,7 @@
 import { HttpError } from "@lib/HttpError";
 import type { AuthAdapter, OAuthProfile } from "@lib/authAdapter";
+import type { SessionMetadata, SessionInfo } from "@lib/session";
+import { getPersistSessionMetadata, getIncludeInactiveSessions } from "@lib/appConfig";
 
 // ---------------------------------------------------------------------------
 // In-memory stores — module-level Maps, always ready, lost on process restart
@@ -14,9 +16,21 @@ interface UserRecord {
   emailVerified: boolean;
 }
 
+interface MemorySession {
+  sessionId: string;
+  userId: string;
+  token: string | null;
+  createdAt: number;
+  lastActiveAt: number;
+  expiresAt: number;
+  ipAddress?: string;
+  userAgent?: string;
+}
+
 const _users              = new Map<string, UserRecord>();
 const _byEmail            = new Map<string, string>();
-const _sessions           = new Map<string, { token: string; expiresAt: number }>();
+const _sessions           = new Map<string, MemorySession>();        // sessionId → session
+const _userSessionIds     = new Map<string, Set<string>>();          // userId → Set<sessionId>
 const _oauthStates        = new Map<string, { codeVerifier?: string; linkUserId?: string; expiresAt: number }>();
 const _cache              = new Map<string, { value: string; expiresAt?: number }>();
 const _verificationTokens = new Map<string, { userId: string; email: string; expiresAt: number }>();
@@ -26,6 +40,7 @@ export const clearMemoryStore = (): void => {
   _users.clear();
   _byEmail.clear();
   _sessions.clear();
+  _userSessionIds.clear();
   _oauthStates.clear();
   _cache.clear();
   _verificationTokens.clear();
@@ -151,18 +166,90 @@ export const memoryAuthAdapter: AuthAdapter = {
 
 const SESSION_TTL_MS = 60 * 60 * 24 * 7 * 1000; // 7 days
 
-export const memoryCreateSession = (userId: string, token: string): void => {
-  _sessions.set(userId, { token, expiresAt: Date.now() + SESSION_TTL_MS });
+export const memoryCreateSession = (userId: string, token: string, sessionId: string, metadata?: SessionMetadata): void => {
+  const now = Date.now();
+  const session: MemorySession = {
+    sessionId, userId, token,
+    createdAt: now, lastActiveAt: now, expiresAt: now + SESSION_TTL_MS,
+    ipAddress: metadata?.ipAddress,
+    userAgent: metadata?.userAgent,
+  };
+  _sessions.set(sessionId, session);
+  if (!_userSessionIds.has(userId)) _userSessionIds.set(userId, new Set());
+  _userSessionIds.get(userId)!.add(sessionId);
 };
 
-export const memoryGetSession = (userId: string): string | null => {
-  const entry = _sessions.get(userId);
-  if (!entry || entry.expiresAt <= Date.now()) return null;
+export const memoryGetSession = (sessionId: string): string | null => {
+  const entry = _sessions.get(sessionId);
+  if (!entry || !entry.token || entry.expiresAt <= Date.now()) return null;
   return entry.token;
 };
 
-export const memoryDeleteSession = (userId: string): void => {
-  _sessions.delete(userId);
+export const memoryDeleteSession = (sessionId: string): void => {
+  const entry = _sessions.get(sessionId);
+  if (!entry) return;
+  if (getPersistSessionMetadata()) {
+    entry.token = null;
+  } else {
+    _sessions.delete(sessionId);
+    _userSessionIds.get(entry.userId)?.delete(sessionId);
+  }
+};
+
+export const memoryGetUserSessions = (userId: string): SessionInfo[] => {
+  const ids = _userSessionIds.get(userId);
+  if (!ids) return [];
+  const now = Date.now();
+  const includeInactive = getIncludeInactiveSessions();
+  const persist = getPersistSessionMetadata();
+  const results: SessionInfo[] = [];
+  for (const sessionId of ids) {
+    const s = _sessions.get(sessionId);
+    if (!s) continue;
+    const isActive = !!s.token && s.expiresAt > now;
+    if (!isActive && !persist) continue;
+    if (!isActive && !includeInactive) continue;
+    results.push({
+      sessionId: s.sessionId,
+      createdAt: s.createdAt,
+      lastActiveAt: s.lastActiveAt,
+      expiresAt: s.expiresAt,
+      ipAddress: s.ipAddress,
+      userAgent: s.userAgent,
+      isActive,
+    });
+  }
+  return results;
+};
+
+export const memoryGetActiveSessionCount = (userId: string): number => {
+  const ids = _userSessionIds.get(userId);
+  if (!ids) return 0;
+  const now = Date.now();
+  let count = 0;
+  for (const sessionId of ids) {
+    const s = _sessions.get(sessionId);
+    if (s && s.token && s.expiresAt > now) count++;
+  }
+  return count;
+};
+
+export const memoryEvictOldestSession = (userId: string): void => {
+  const ids = _userSessionIds.get(userId);
+  if (!ids) return;
+  const now = Date.now();
+  let oldest: MemorySession | null = null;
+  for (const sessionId of ids) {
+    const s = _sessions.get(sessionId);
+    if (!s || !s.token || s.expiresAt <= now) continue;
+    if (!oldest || s.createdAt < oldest.createdAt) oldest = s;
+  }
+  if (oldest) memoryDeleteSession(oldest.sessionId);
+};
+
+export const memoryUpdateSessionLastActive = (sessionId: string): void => {
+  const entry = _sessions.get(sessionId);
+  if (entry) entry.lastActiveAt = Date.now();
 };
 
 // ---------------------------------------------------------------------------
