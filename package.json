@@ -1,6 +1,6 @@
 {
   "name": "@lastshotlabs/bunshot",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "description": "Batteries-included Bun + Hono API framework — auth, sessions, rate limiting, WebSocket, queues, and OpenAPI docs out of the box",
   "repository": {
     "type": "git",
@@ -63,9 +63,15 @@
     "bullmq": ">=5.0 <6"
   },
   "peerDependenciesMeta": {
-    "mongoose": { "optional": true },
-    "ioredis": { "optional": true },
-    "bullmq": { "optional": true }
+    "mongoose": {
+      "optional": true
+    },
+    "ioredis": {
+      "optional": true
+    },
+    "bullmq": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/bun": "1.3.10",
