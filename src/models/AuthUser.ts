@@ -46,7 +46,7 @@ function getAuthUser() {
 export const AuthUser = new Proxy({} as Model<AuthUserDocument>, {
   get(_, prop) {
     const model = getAuthUser();
-    const val = (model as Record<string | symbol, unknown>)[prop as string];
+    const val = (model as Record<string | symbol, unknown>)[prop];
     return typeof val === "function" ? (val as (...args: unknown[]) => unknown).bind(model) : val;
   },
 });

@@ -35,7 +35,7 @@ function makeConnectionProxy(label: string, getConn: () => Connection | null): C
           `MongoDB ${label} connection not initialized — call connect${label === "auth" ? "AuthMongo" : "AppMongo"}() or connectMongo() first`
         );
       }
-      const val = (conn as Record<string | symbol, unknown>)[prop as string];
+      const val = (conn as Record<string | symbol, unknown>)[prop];
       return typeof val === "function" ? (val as (...args: unknown[]) => unknown).bind(conn) : val;
     },
   });
@@ -62,7 +62,7 @@ export const mongoose: MongooseModule = new Proxy({} as MongooseModule, {
     if (!_mongoose) {
       throw new Error("mongoose not loaded — call connectMongo() or connectAuthMongo() first");
     }
-    const val = (_mongoose as Record<string | symbol, unknown>)[prop as string];
+    const val = (_mongoose as Record<string | symbol, unknown>)[prop];
     return typeof val === "function" ? (val as (...args: unknown[]) => unknown).bind(_mongoose) : val;
   },
 });
