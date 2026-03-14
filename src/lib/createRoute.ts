@@ -1,5 +1,5 @@
 import { createRoute as _createRoute } from "@hono/zod-openapi";
-import { getRefId } from "@asteasolutions/zod-to-openapi";
+import { getRefId, zodToOpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import type { RouteConfig } from "@hono/zod-openapi";
 import type { ZodType } from "zod";
 
@@ -29,7 +29,10 @@ function toBaseName(method: string, path: string): string {
 function maybeRegister(schema: unknown, name: string): void {
   if (!schema || typeof schema !== "object" || !("_def" in schema)) return;
   if (getRefId(schema as ZodType)) return; // already named via .openapi()
-  (schema as ZodType).openapi(name);
+  // Write directly to the registry instead of calling schema.openapi(name) — the
+  // .openapi() method requires extendZodWithOpenApi() to have been called on the
+  // same zod instance that created the schema, which isn't guaranteed in tenant apps.
+  zodToOpenAPIRegistry.add(schema as any, { _internal: { refId: name } } as any);
 }
 
 /**
