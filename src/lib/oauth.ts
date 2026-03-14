@@ -1,8 +1,7 @@
 import { Google, Apple, generateState, generateCodeVerifier } from "arctic";
 import { getRedis } from "./redis";
-import { appConnection } from "./mongo";
+import { appConnection, mongoose } from "./mongo";
 import { getAppName } from "./appConfig";
-import { Schema } from "mongoose";
 import { sqliteStoreOAuthState, sqliteConsumeOAuthState } from "../adapters/sqliteAuth";
 import { memoryStoreOAuthState, memoryConsumeOAuthState } from "../adapters/memoryAuth";
 
@@ -52,19 +51,19 @@ interface OAuthStateDoc {
   expiresAt: Date;
 }
 
-const oauthStateSchema = new Schema<OAuthStateDoc>(
-  {
-    state:        { type: String, required: true, unique: true },
-    codeVerifier: { type: String },
-    linkUserId:   { type: String },
-    expiresAt:    { type: Date, required: true, index: { expireAfterSeconds: 0 } },
-  },
-  { collection: "oauth_states" }
-);
-
 function getOAuthStateModel() {
-  return appConnection.models["OAuthState"] ??
-    appConnection.model<OAuthStateDoc>("OAuthState", oauthStateSchema);
+  if (appConnection.models["OAuthState"]) return appConnection.models["OAuthState"];
+  const { Schema } = mongoose as unknown as typeof import("mongoose");
+  const oauthStateSchema = new Schema<OAuthStateDoc>(
+    {
+      state:        { type: String, required: true, unique: true },
+      codeVerifier: { type: String },
+      linkUserId:   { type: String },
+      expiresAt:    { type: Date, required: true, index: { expireAfterSeconds: 0 } },
+    },
+    { collection: "oauth_states" }
+  );
+  return appConnection.model<OAuthStateDoc>("OAuthState", oauthStateSchema);
 }
 
 // ---------------------------------------------------------------------------

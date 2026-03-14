@@ -1,7 +1,6 @@
 import { getRedis } from "./redis";
-import { appConnection } from "./mongo";
+import { appConnection, mongoose } from "./mongo";
 import { getAppName, getPersistSessionMetadata, getIncludeInactiveSessions } from "./appConfig";
-import { Schema } from "mongoose";
 import {
   sqliteCreateSession,
   sqliteGetSession,
@@ -55,22 +54,22 @@ interface SessionDoc {
   userAgent?: string;
 }
 
-const sessionSchema = new Schema<SessionDoc>(
-  {
-    sessionId:    { type: String, required: true, unique: true },
-    userId:       { type: String, required: true, index: true },
-    token:        { type: String, default: null },
-    createdAt:    { type: Date,   required: true },
-    lastActiveAt: { type: Date,   required: true },
-    expiresAt:    { type: Date,   required: true },
-    ipAddress:    { type: String },
-    userAgent:    { type: String },
-  },
-  { collection: "sessions", timestamps: false }
-);
-
 function getSessionModel() {
   if (appConnection.models["Session"]) return appConnection.models["Session"];
+  const { Schema } = mongoose as unknown as typeof import("mongoose");
+  const sessionSchema = new Schema<SessionDoc>(
+    {
+      sessionId:    { type: String, required: true, unique: true },
+      userId:       { type: String, required: true, index: true },
+      token:        { type: String, default: null },
+      createdAt:    { type: Date,   required: true },
+      lastActiveAt: { type: Date,   required: true },
+      expiresAt:    { type: Date,   required: true },
+      ipAddress:    { type: String },
+      userAgent:    { type: String },
+    },
+    { collection: "sessions", timestamps: false }
+  );
   // Add TTL index only when metadata is not persisted — docs auto-delete at expiresAt.
   // When persisting, token is nulled (soft-delete) but the row is kept indefinitely.
   if (!getPersistSessionMetadata()) {

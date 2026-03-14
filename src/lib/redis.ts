@@ -3,7 +3,6 @@ import { log } from "./logger";
 
 const isProd = process.env.NODE_ENV === "production";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function requireIoredis(): new (opts: RedisOptions) => RedisClass {
   try {
     // Bun supports require() in ESM; this defers the import to call time

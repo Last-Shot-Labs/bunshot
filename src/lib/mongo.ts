@@ -1,9 +1,11 @@
-import type { Connection, default as MongooseType } from "mongoose";
+import type { Connection, Mongoose } from "mongoose";
 import { log } from "./logger";
+
+type MongooseModule = Mongoose;
 
 const isProd = process.env.NODE_ENV === "production";
 
-function requireMongoose(): typeof MongooseType {
+function requireMongoose(): MongooseModule {
   try {
     // Bun supports require() in ESM; this defers the import to call time
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -22,7 +24,7 @@ function buildUri(user: string, password: string, host: string, db: string): str
 // Internal mutable references — set inside connect functions
 let _authConn: Connection | null = null;
 let _appConn: Connection | null = null;
-let _mongoose: typeof MongooseType | null = null;
+let _mongoose: MongooseModule | null = null;
 
 function makeConnectionProxy(label: string, getConn: () => Connection | null): Connection {
   return new Proxy({} as Connection, {
@@ -55,7 +57,7 @@ export const appConnection: Connection = makeConnectionProxy("app", () => _appCo
 /**
  * The mongoose instance. Available after connectMongo() / connectAuthMongo() is called.
  */
-export const mongoose: typeof MongooseType = new Proxy({} as typeof MongooseType, {
+export const mongoose: MongooseModule = new Proxy({} as MongooseModule, {
   get(_, prop) {
     if (!_mongoose) {
       throw new Error("mongoose not loaded — call connectMongo() or connectAuthMongo() first");
