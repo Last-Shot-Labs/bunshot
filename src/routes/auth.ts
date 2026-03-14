@@ -325,6 +325,9 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
         }
         const passwordHash = await Bun.password.hash(password);
         await adapter.setPassword(entry.userId, passwordHash);
+        // Revoke all sessions so stolen JWTs can't stay valid after a reset
+        const sessions = await getUserSessions(entry.userId);
+        await Promise.all(sessions.map((s) => deleteSession(s.sessionId)));
         return c.json({ message: "Password reset successfully" }, 200);
       }
     );

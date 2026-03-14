@@ -34,7 +34,7 @@ const _userSessionIds     = new Map<string, Set<string>>();          // userId â
 const _oauthStates        = new Map<string, { codeVerifier?: string; linkUserId?: string; expiresAt: number }>();
 const _cache              = new Map<string, { value: string; expiresAt?: number }>();
 const _verificationTokens = new Map<string, { userId: string; email: string; expiresAt: number }>();
-const _resetTokens         = new Map<string, { userId: string; email: string; expiresAt: number }>();
+const _resetTokens        = new Map<string, { userId: string; email: string; expiresAt: number }>();
 
 /** Reset all in-memory state. Useful for test isolation. */
 export const clearMemoryStore = (): void => {
