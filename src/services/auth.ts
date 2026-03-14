@@ -6,7 +6,7 @@ import type { SessionMetadata } from "@lib/session";
 import { getDefaultRole, getPrimaryField, getEmailVerificationConfig, getMaxSessions } from "@lib/appConfig";
 import { createVerificationToken } from "@lib/emailVerification";
 
-export const register = async (identifier: string, password: string, metadata?: SessionMetadata): Promise<string> => {
+export const register = async (identifier: string, password: string, metadata?: SessionMetadata): Promise<{ token: string; userId: string; email?: string }> => {
   const hashed = await Bun.password.hash(password);
   const adapter = getAuthAdapter();
   const user = await adapter.create(identifier, hashed);
@@ -30,10 +30,10 @@ export const register = async (identifier: string, password: string, metadata?: 
     }
   }
 
-  return token;
+  return { token, userId: user.id, email: identifier };
 };
 
-export const login = async (identifier: string, password: string, metadata?: SessionMetadata): Promise<{ token: string; emailVerified?: boolean }> => {
+export const login = async (identifier: string, password: string, metadata?: SessionMetadata): Promise<{ token: string; userId: string; email?: string; emailVerified?: boolean; googleLinked?: boolean }> => {
   const adapter = getAuthAdapter();
   const findFn = adapter.findByIdentifier ?? adapter.findByEmail.bind(adapter);
   const user = await findFn(identifier);
@@ -47,6 +47,9 @@ export const login = async (identifier: string, password: string, metadata?: Ses
     await evictOldestSession(user.id);
   }
 
+  const fullUser = adapter.getUser ? await adapter.getUser(user.id) : null;
+  const googleLinked = fullUser?.providerIds?.some((id) => id.startsWith("google:")) ?? false;
+
   const evConfig = getEmailVerificationConfig();
   if (evConfig && getPrimaryField() === "email" && adapter.getEmailVerified) {
     const verified = await adapter.getEmailVerified(user.id);
@@ -54,11 +57,11 @@ export const login = async (identifier: string, password: string, metadata?: Ses
       throw new HttpError(403, "Email not verified");
     }
     await createSession(user.id, token, sessionId, metadata);
-    return { token, emailVerified: verified };
+    return { token, userId: user.id, email: user.email, emailVerified: verified, googleLinked };
   }
 
   await createSession(user.id, token, sessionId, metadata);
-  return { token };
+  return { token, userId: user.id, email: user.email, googleLinked };
 };
 
 export const logout = async (token: string | null) => {

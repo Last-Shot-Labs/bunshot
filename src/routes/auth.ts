@@ -15,7 +15,13 @@ import type { AuthRateLimitConfig } from "../app";
 import { getUserSessions, deleteSession } from "@lib/session";
 
 const isProd = process.env.NODE_ENV === "production";
-const TokenResponse = z.object({ token: z.string(), emailVerified: z.boolean().optional() });
+const TokenResponse = z.object({
+  token: z.string(),
+  userId: z.string(),
+  email: z.string().optional(),
+  emailVerified: z.boolean().optional(),
+  googleLinked: z.boolean().optional(),
+});
 const ErrorResponse = z.object({ error: z.string() });
 const tags = ["Auth"];
 
@@ -76,9 +82,9 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
         ipAddress: ip !== "unknown" ? ip : undefined,
         userAgent: c.req.header("user-agent") ?? undefined,
       };
-      const token = await AuthService.register(identifier, body.password, metadata);
-      setCookie(c, COOKIE_TOKEN, token, cookieOptions);
-      return c.json({ token }, 201);
+      const result = await AuthService.register(identifier, body.password, metadata);
+      setCookie(c, COOKIE_TOKEN, result.token, cookieOptions);
+      return c.json(result, 201);
     }
   );
 
