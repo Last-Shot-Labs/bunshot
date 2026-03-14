@@ -77,6 +77,43 @@ export const registerSchema = <T extends ZodType>(name: string, schema: T): T =>
 };
 
 /**
+ * Registers multiple Zod schemas at once as named entries in `components/schemas`.
+ * Object keys become the schema names. Returns the same object so you can
+ * destructure or re-export the schemas normally.
+ *
+ * Schemas already registered (e.g. via a prior `registerSchema` call) are skipped.
+ *
+ * @example
+ * export const { LedgerItem, Product } = registerSchemas({
+ *   LedgerItem: z.object({ id: z.string(), amount: z.number() }),
+ *   Product:    z.object({ id: z.string(), price: z.number() }),
+ * });
+ */
+export const registerSchemas = <T extends Record<string, ZodType>>(schemas: T): T => {
+  for (const [name, schema] of Object.entries(schemas)) {
+    if (!getRefId(schema)) {
+      zodToOpenAPIRegistry.add(schema as any, { _internal: { refId: name } } as any);
+    }
+  }
+  return schemas;
+};
+
+/**
+ * Auto-registers a module export as a named OpenAPI schema.
+ * Used internally by modelSchemas auto-discovery in createApp.
+ * Strips a trailing "Schema" suffix from the export name.
+ * Skips non-Zod values and already-registered schemas.
+ */
+export function maybeAutoRegister(exportName: string, value: unknown): void {
+  if (!value || typeof value !== "object" || !("_def" in value)) return;
+  if (getRefId(value as ZodType)) return;
+  const name = exportName.endsWith("Schema")
+    ? exportName.slice(0, -"Schema".length)
+    : exportName;
+  zodToOpenAPIRegistry.add(value as any, { _internal: { refId: name } } as any);
+}
+
+/**
  * Adds an OpenAPI `security` requirement to a route without affecting TypeScript
  * type inference on the handler. Pass each security scheme as a separate object.
  *

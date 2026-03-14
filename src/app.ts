@@ -26,6 +26,7 @@ import { connectMongo, connectAuthMongo, connectAppMongo } from "@lib/mongo";
 import { connectRedis } from "@lib/redis";
 import { setSessionStore } from "@lib/session";
 import { setCacheStore } from "@middleware/cacheResponse";
+import { maybeAutoRegister } from "@lib/createRoute";
 
 type StoreType = "redis" | "mongo" | "sqlite" | "memory";
 
@@ -204,9 +205,38 @@ export interface SecurityConfig {
   botProtection?: BotProtectionConfig;
 }
 
+export interface ModelSchemasConfig {
+  /**
+   * One or more absolute directory paths or glob patterns containing shared Zod schemas.
+   * All matching .ts files are imported before routes so schemas are registered first.
+   * Examples:
+   *   import.meta.dir + "/schemas"
+   *   [import.meta.dir + "/schemas", import.meta.dir + "/models"]
+   *   import.meta.dir + "/models/**\/*.schema.ts"
+   */
+  paths: string | string[];
+  /**
+   * How schemas found in the files are registered in `components/schemas`.
+   * - "auto" (default): exported Zod schemas are registered automatically. The export
+   *   name is used as the schema name, with a trailing "Schema" suffix stripped
+   *   (e.g. `LedgerItemSchema` → `"LedgerItem"`). Schemas already registered via
+   *   `registerSchema` or `registerSchemas` inside the file are never overwritten.
+   * - "explicit": files are imported but registration is entirely up to the user —
+   *   call `registerSchema` or `registerSchemas` inside each file.
+   */
+  registration?: "auto" | "explicit";
+}
+
 export interface CreateAppConfig {
   /** Absolute path to the service's routes directory (use import.meta.dir + "/routes") */
   routesDir: string;
+  /**
+   * Shared Zod schema sources. Files are imported before route discovery so schemas
+   * are registered before any route references them.
+   * Accepts a directory path, an array of paths/globs, or a full ModelSchemasConfig object.
+   * Shorthand string/array defaults to registration: "auto".
+   */
+  modelSchemas?: string | string[] | ModelSchemasConfig;
   /** App name and version for the root endpoint and OpenAPI docs */
   app?: AppMeta;
   /** Auth, roles, and OAuth configuration */
@@ -363,6 +393,43 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
   for (const mw of middleware) app.use(mw);
 
   setAppName(appName);
+
+  // Schema pre-loading — import shared schema files before routes so registerSchema /
+  // registerSchemas calls run first, guaranteeing $ref instead of inline shapes.
+  const msConfig = config.modelSchemas;
+  if (msConfig) {
+    const { paths, registration = "auto" } =
+      typeof msConfig === "string" || Array.isArray(msConfig)
+        ? { paths: msConfig, registration: "auto" as const }
+        : msConfig;
+    const pathArray = Array.isArray(paths) ? paths : [paths];
+
+    for (const entry of pathArray) {
+      // Split glob patterns: everything before the first wildcard segment is the cwd.
+      let cwd: string;
+      let pattern: string;
+      if (!entry.includes("*")) {
+        cwd = entry;
+        pattern = "**/*.ts";
+      } else {
+        const parts = entry.split("/");
+        const starIdx = parts.findIndex((p) => p.includes("*"));
+        cwd = parts.slice(0, starIdx).join("/");
+        pattern = parts.slice(starIdx).join("/");
+      }
+
+      const schemaGlob = new Bun.Glob(pattern);
+      for await (const file of schemaGlob.scan({ cwd })) {
+        const mod = await import(`${cwd}/${file}`);
+        if (registration === "auto") {
+          for (const [exportName, value] of Object.entries(mod)) {
+            maybeAutoRegister(exportName, value);
+          }
+        }
+        // "explicit": file imported; any registerSchema/registerSchemas calls inside already ran
+      }
+    }
+  }
 
   // Core routes (auth, etc.)
   const coreRoutesDir = import.meta.dir + "/routes";

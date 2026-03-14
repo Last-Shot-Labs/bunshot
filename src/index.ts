@@ -1,7 +1,7 @@
 // App factory
 export { createApp } from "./app";
 export { createServer } from "./server";
-export type { CreateAppConfig, DbConfig, AppMeta, AuthConfig, AuthRateLimitConfig, OAuthConfig, SecurityConfig, BotProtectionConfig, PrimaryField, EmailVerificationConfig, PasswordResetConfig } from "./app";
+export type { CreateAppConfig, ModelSchemasConfig, DbConfig, AppMeta, AuthConfig, AuthRateLimitConfig, OAuthConfig, SecurityConfig, BotProtectionConfig, PrimaryField, EmailVerificationConfig, PasswordResetConfig } from "./app";
 export type { CreateServerConfig, WsConfig } from "./server";
 
 // Database
@@ -13,7 +13,7 @@ export { getAppRoles } from "@lib/appConfig";
 export { HttpError } from "@lib/HttpError";
 export { COOKIE_TOKEN, HEADER_USER_TOKEN } from "@lib/constants";
 export { createRouter } from "@lib/context";
-export { createRoute, withSecurity, registerSchema } from "@lib/createRoute";
+export { createRoute, withSecurity, registerSchema, registerSchemas } from "@lib/createRoute";
 export type { AppEnv, AppVariables } from "@lib/context";
 export { signToken, verifyToken } from "@lib/jwt";
 export { log } from "@lib/logger";

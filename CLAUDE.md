@@ -32,7 +32,11 @@ This is a **Bun + Hono API framework library** that consuming projects install a
 
 **OpenAPI schema auto-registration:** Import `createRoute` from `@lastshotlabs/bunshot` (not from `@hono/zod-openapi` directly). The wrapper auto-registers every unnamed request body / response schema as a named `components/schemas` entry by writing directly to `zodToOpenAPIRegistry` (bypasses `.openapi()` prototype dependency). HTTP methods map to action verbs (`post→Create`, `patch→Update`, `put→Replace`, `delete→Delete`, `get→Get`); request bodies get a `Request` suffix; response status codes map to semantic suffixes (`200/201/204→Response`, `400→BadRequestError`, `401→UnauthorizedError`, `403→ForbiddenError`, `404→NotFoundError`, `409→ConflictError`, `422→ValidationError`, `429→RateLimitError`, `500→InternalError`, unknown codes fall back to the number). Schemas already registered are never overwritten. Implementation: `src/lib/createRoute.ts`.
 
-**`registerSchema`:** Explicit named registration for shared schemas not attached to a specific route. `registerSchema("Name", schema)` returns the schema unchanged. Works anywhere — inline in route files, in a shared schema file, etc. Exported from the package.
+**`registerSchema`:** Explicit named registration for a single shared schema. `registerSchema("Name", schema)` returns the schema unchanged. Works anywhere — inline in route files, in a shared schema file, etc. Exported from the package.
+
+**`registerSchemas`:** Batch version of `registerSchema`. Accepts an object where keys are schema names; returns the same object. `registerSchemas({ LedgerItem: z.object({...}), Product: z.object({...}) })` registers both at once and returns them for export/use. Exported from the package.
+
+**`modelSchemas` auto-discovery:** Pass `modelSchemas` to `createServer`/`createApp` with a directory path, array of paths, or glob patterns. All matching `.ts` files are imported *before* route discovery. With `registration: "auto"` (default), every exported Zod schema is auto-registered — the export name is used as the `refId` with a trailing `Schema` suffix stripped (`LedgerItemSchema` → `"LedgerItem"`). Schemas already registered via `registerSchema`/`registerSchemas` are never overwritten. With `registration: "explicit"`, files are imported but registration is left to the user. Supports co-location with models or services via glob: `modelSchemas: [dir + "/models", dir + "/schemas/**/*.schema.ts"]`.
 
 **`withSecurity`:** Adds OpenAPI `security` requirements to a route after `createRoute` has inferred its generic type parameter. Inlining `security: [...]` inside `createRoute({...})` breaks `c.req.valid()` inference (TypeScript collapses `InputTypeJson<R>` to `never`). Usage: `withSecurity(createRoute({...}), { cookieAuth: [] }, { userToken: [] })`. Exported from the package.
 
@@ -56,7 +60,7 @@ This is a **Bun + Hono API framework library** that consuming projects install a
 | `rateLimit.ts` | Per-key rate limiting; exports `trackAttempt`, `isLimited`, `bustAuthLimit` for use in custom routes |
 | `resetPassword.ts` | Password reset token CRUD — `createResetToken`, `consumeResetToken`; 4-backend (redis/mongo/sqlite/memory); store set via `setPasswordResetStore` |
 | `ws.ts` | WebSocket room registry, pub/sub helpers (`publish`, `subscribe`, `unsubscribe`, `getSubscriptions`, `handleRoomActions`, `getRooms`, `getRoomSubscribers`) — in-memory, no DB dependency |
-| `createRoute.ts` | Wraps `@hono/zod-openapi`'s `createRoute` to auto-register unnamed request/response schemas as named OpenAPI components; also exports `withSecurity` (adds security after type inference) and `registerSchema` (explicit named registration); all three re-exported from the package |
+| `createRoute.ts` | Wraps `@hono/zod-openapi`'s `createRoute` to auto-register unnamed request/response schemas as named OpenAPI components; also exports `withSecurity` (adds security after type inference), `registerSchema` (single explicit registration), `registerSchemas` (batch registration), and `maybeAutoRegister` (internal, used by `modelSchemas` discovery in `createApp`); all public exports re-exported from the package |
 
 ### Middleware (`src/middleware/`)
 
