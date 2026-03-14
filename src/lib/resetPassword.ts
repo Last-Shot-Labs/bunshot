@@ -47,6 +47,30 @@ function getResetModel() {
 }
 
 // ---------------------------------------------------------------------------
+// Redis helpers
+// ---------------------------------------------------------------------------
+
+/** Atomically GET+DEL a key. Uses native GETDEL (Redis >= 6.2) with a Lua fallback. */
+async function redisGetDel(key: string): Promise<string | null> {
+  const redis = getRedis() as any;
+  if (typeof redis.getdel === "function") {
+    try {
+      return await redis.getdel(key);
+    } catch (err: any) {
+      const msg: string = err?.message ?? "";
+      if (!/unknown command|ERR unknown command/i.test(msg)) throw err;
+      // Fall through to Lua on "unknown command"
+    }
+  }
+  const result = await redis.eval(
+    "local v = redis.call('GET', KEYS[1])\nif v then redis.call('DEL', KEYS[1]) end\nreturn v",
+    1,
+    key
+  );
+  return result ?? null;
+}
+
+// ---------------------------------------------------------------------------
 // Store configuration
 // ---------------------------------------------------------------------------
 
@@ -97,8 +121,8 @@ export const consumeResetToken = async (token: string): Promise<{ userId: string
     if (!doc) return null;
     return { userId: doc.userId, email: doc.email };
   }
-  // Redis: GETDEL atomically returns and removes the key
-  const raw = await getRedis().getdel(`reset:${getAppName()}:${hash}`);
+  // Redis: atomically return and remove the key (GETDEL or Lua fallback)
+  const raw = await redisGetDel(`reset:${getAppName()}:${hash}`);
   if (!raw) return null;
   return JSON.parse(raw) as { userId: string; email: string };
 };

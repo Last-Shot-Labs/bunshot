@@ -48,7 +48,7 @@ This is a **Bun + Hono API framework library** that consuming projects install a
 | `oauth.ts` | OAuth provider coordination via `arctic` — state store set via `db.oauthState` |
 | `cache.ts` | Response cache — default store set via `db.cache`, overridable per-route; exports `bustCache` (all stores) and `bustCachePattern` (wildcard invalidation) |
 | `rateLimit.ts` | Per-key rate limiting; exports `trackAttempt`, `isLimited`, `bustAuthLimit` for use in custom routes |
-| `resetPassword.ts` | Password reset token CRUD — `createResetToken`, `getResetToken`, `deleteResetToken`; 4-backend (redis/mongo/sqlite/memory); store set via `setPasswordResetStore` |
+| `resetPassword.ts` | Password reset token CRUD — `createResetToken`, `consumeResetToken`; 4-backend (redis/mongo/sqlite/memory); store set via `setPasswordResetStore` |
 | `ws.ts` | WebSocket room registry, pub/sub helpers (`publish`, `subscribe`, `unsubscribe`, `getSubscriptions`, `handleRoomActions`, `getRooms`, `getRoomSubscribers`) — in-memory, no DB dependency |
 
 ### Middleware (`src/middleware/`)

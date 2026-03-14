@@ -296,20 +296,6 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
     authAdapter = mongoAuthAdapter;
   }
 
-  setAuthAdapter(authAdapter);
-  setAppRoles(roles);
-  setDefaultRole(defaultRole ?? null);
-  setPrimaryField(primaryField);
-  setEmailVerificationConfig(emailVerification ?? null);
-  setEmailVerificationStore(sessions);
-  setPasswordResetConfig(passwordReset ?? null);
-  setPasswordResetStore(sessions);
-  setAuthRateLimitStore(authRateLimit?.store ?? (enableRedis ? "redis" : "memory"));
-  setMaxSessions(sessionPolicy.maxSessions ?? 6);
-  setPersistSessionMetadata(sessionPolicy.persistSessionMetadata ?? true);
-  setIncludeInactiveSessions(sessionPolicy.includeInactiveSessions ?? false);
-  setTrackLastActive(sessionPolicy.trackLastActive ?? false);
-
   if (defaultRole && !authAdapter.setRoles) {
     throw new Error(`createApp: "defaultRole" is set to "${defaultRole}" but the auth adapter does not implement setRoles. Add setRoles to your adapter or remove defaultRole.`);
   }
@@ -325,6 +311,20 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
   if (passwordReset && !authAdapter.setPassword) {
     throw new Error(`createApp: "passwordReset" is configured but the auth adapter does not implement setPassword. Add setPassword to your adapter or remove passwordReset.`);
   }
+
+  setAuthAdapter(authAdapter);
+  setAppRoles(roles);
+  setDefaultRole(defaultRole ?? null);
+  setPrimaryField(primaryField);
+  setEmailVerificationConfig(emailVerification ?? null);
+  setEmailVerificationStore(sessions);
+  setPasswordResetConfig(passwordReset ?? null);
+  setPasswordResetStore(sessions);
+  setAuthRateLimitStore(authRateLimit?.store ?? (enableRedis ? "redis" : "memory"));
+  setMaxSessions(sessionPolicy.maxSessions ?? 6);
+  setPersistSessionMetadata(sessionPolicy.persistSessionMetadata ?? true);
+  setIncludeInactiveSessions(sessionPolicy.includeInactiveSessions ?? false);
+  setTrackLastActive(sessionPolicy.trackLastActive ?? false);
 
   if (oauthProviders) initOAuthProviders(oauthProviders);
   const configuredOAuth = getConfiguredOAuthProviders();
