@@ -10,9 +10,10 @@ import { bearerAuth } from "@middleware/bearerAuth";
 import { identify } from "@middleware/identify";
 import type { AppEnv } from "@lib/context";
 import { HEADER_USER_TOKEN } from "@lib/constants";
-import { setAppName, setAppRoles, setDefaultRole, setPrimaryField, setEmailVerificationConfig, setMaxSessions, setPersistSessionMetadata, setIncludeInactiveSessions, setTrackLastActive } from "@lib/appConfig";
-import type { PrimaryField, EmailVerificationConfig } from "@lib/appConfig";
+import { setAppName, setAppRoles, setDefaultRole, setPrimaryField, setEmailVerificationConfig, setPasswordResetConfig, setMaxSessions, setPersistSessionMetadata, setIncludeInactiveSessions, setTrackLastActive } from "@lib/appConfig";
+import type { PrimaryField, EmailVerificationConfig, PasswordResetConfig } from "@lib/appConfig";
 import { setEmailVerificationStore } from "@lib/emailVerification";
+import { setPasswordResetStore } from "@lib/resetPassword";
 import { setAuthRateLimitStore } from "@lib/authRateLimit";
 import { setAuthAdapter } from "@lib/authAdapter";
 import { mongoAuthAdapter } from "./adapters/mongoAuth";
@@ -96,6 +97,10 @@ export interface AuthRateLimitConfig {
   verifyEmail?: { windowMs?: number; max?: number };
   /** Max resend-verification attempts per user per window. Default: 3 per hour. */
   resendVerification?: { windowMs?: number; max?: number };
+  /** Max forgot-password requests per IP per window. Default: 5 per 15 min. */
+  forgotPassword?: { windowMs?: number; max?: number };
+  /** Max reset-password attempts per IP per window. Default: 10 per 15 min. */
+  resetPassword?: { windowMs?: number; max?: number };
   /**
    * Store backend for auth rate limit counters.
    * Defaults to "redis" when Redis is enabled, otherwise "memory".
@@ -131,6 +136,11 @@ export interface AuthConfig {
    * Provide an onSend callback to send the verification email via any provider (Resend, SendGrid, etc.).
    */
   emailVerification?: EmailVerificationConfig;
+  /**
+   * Password reset configuration. Only active when primaryField is "email".
+   * Provide an onSend callback to send the reset email via any provider (Resend, SendGrid, etc.).
+   */
+  passwordReset?: PasswordResetConfig;
   /** Rate limit configuration for built-in auth endpoints. */
   rateLimit?: AuthRateLimitConfig;
   /** Session concurrency and metadata persistence policy. */
@@ -157,7 +167,7 @@ export interface AuthSessionPolicyConfig {
   trackLastActive?: boolean;
 }
 
-export type { PrimaryField, EmailVerificationConfig };
+export type { PrimaryField, EmailVerificationConfig, PasswordResetConfig };
 
 export interface BotProtectionConfig {
   /**
@@ -238,6 +248,7 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
   const defaultRole = authConfig.defaultRole;
   const primaryField = authConfig.primaryField ?? "email";
   const emailVerification = authConfig.emailVerification;
+  const passwordReset = authConfig.passwordReset;
   const authRateLimit = authConfig.rateLimit;
   const sessionPolicy = authConfig.sessionPolicy ?? {};
 
@@ -290,6 +301,8 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
   setPrimaryField(primaryField);
   setEmailVerificationConfig(emailVerification ?? null);
   setEmailVerificationStore(sessions);
+  setPasswordResetConfig(passwordReset ?? null);
+  setPasswordResetStore(sessions);
   setAuthRateLimitStore(authRateLimit?.store ?? (enableRedis ? "redis" : "memory"));
   setMaxSessions(sessionPolicy.maxSessions ?? 6);
   setPersistSessionMetadata(sessionPolicy.persistSessionMetadata ?? true);
@@ -298,6 +311,15 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
 
   if (defaultRole && !authAdapter.setRoles) {
     throw new Error(`createApp: "defaultRole" is set to "${defaultRole}" but the auth adapter does not implement setRoles. Add setRoles to your adapter or remove defaultRole.`);
+  }
+  if (emailVerification && primaryField !== "email") {
+    throw new Error(`createApp: "emailVerification" is only supported when primaryField is "email". Either set primaryField to "email" or remove emailVerification.`);
+  }
+  if (passwordReset && primaryField !== "email") {
+    throw new Error(`createApp: "passwordReset" is only supported when primaryField is "email". Either set primaryField to "email" or remove passwordReset.`);
+  }
+  if (passwordReset && !authAdapter.setPassword) {
+    throw new Error(`createApp: "passwordReset" is configured but the auth adapter does not implement setPassword. Add setPassword to your adapter or remove passwordReset.`);
   }
 
   if (oauthProviders) initOAuthProviders(oauthProviders);
@@ -350,7 +372,7 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
 
   if (enableAuthRoutes) {
     const { createAuthRouter } = await import(`${coreRoutesDir}/auth`);
-    app.route("/", createAuthRouter({ primaryField, emailVerification, rateLimit: authRateLimit }));
+    app.route("/", createAuthRouter({ primaryField, emailVerification, passwordReset, rateLimit: authRateLimit }));
   }
 
   if (configuredOAuth.length > 0) {

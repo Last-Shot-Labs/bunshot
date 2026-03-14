@@ -2,8 +2,7 @@ import type { MiddlewareHandler } from "hono";
 import { getRedis } from "@lib/redis";
 import { getAppName } from "@lib/appConfig";
 import type { AppEnv } from "@lib/context";
-import { appConnection } from "@lib/mongo";
-import { Schema } from "mongoose";
+import { appConnection, mongoose } from "@lib/mongo";
 import { isSqliteReady, sqliteGetCache, sqliteSetCache, sqliteDelCache, sqliteDelCachePattern } from "../adapters/sqliteAuth";
 import { memoryGetCache, memorySetCache, memoryDelCache, memoryDelCachePattern } from "../adapters/memoryAuth";
 
@@ -17,18 +16,18 @@ interface CacheDoc {
   expiresAt?: Date;
 }
 
-const cacheSchema = new Schema<CacheDoc>(
-  {
-    key: { type: String, required: true, unique: true },
-    value: { type: String, required: true },
-    expiresAt: { type: Date, index: { expireAfterSeconds: 0 } },
-  },
-  { collection: "cache_entries" }
-);
-
 function getCacheModel() {
-  return appConnection.models["CacheEntry"] ??
-    appConnection.model<CacheDoc>("CacheEntry", cacheSchema);
+  if (appConnection.models["CacheEntry"]) return appConnection.models["CacheEntry"];
+  const { Schema } = mongoose as unknown as typeof import("mongoose");
+  const cacheSchema = new Schema<CacheDoc>(
+    {
+      key: { type: String, required: true, unique: true },
+      value: { type: String, required: true },
+      expiresAt: { type: Date, index: { expireAfterSeconds: 0 } },
+    },
+    { collection: "cache_entries" }
+  );
+  return appConnection.model<CacheDoc>("CacheEntry", cacheSchema);
 }
 
 function isMongoReady(): boolean {

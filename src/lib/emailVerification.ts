@@ -1,7 +1,6 @@
 import { getRedis } from "./redis";
-import { appConnection } from "./mongo";
+import { appConnection, mongoose } from "./mongo";
 import { getAppName, getTokenExpiry } from "./appConfig";
-import { Schema } from "mongoose";
 import {
   sqliteCreateVerificationToken,
   sqliteGetVerificationToken,
@@ -24,19 +23,19 @@ interface VerificationDoc {
   expiresAt: Date;
 }
 
-const verificationSchema = new Schema<VerificationDoc>(
-  {
-    token:     { type: String, required: true, unique: true },
-    userId:    { type: String, required: true },
-    email:     { type: String, required: true },
-    expiresAt: { type: Date,   required: true, index: { expireAfterSeconds: 0 } },
-  },
-  { collection: "email_verifications" }
-);
-
 function getVerificationModel() {
-  return appConnection.models["EmailVerification"] ??
-    appConnection.model<VerificationDoc>("EmailVerification", verificationSchema);
+  if (appConnection.models["EmailVerification"]) return appConnection.models["EmailVerification"];
+  const { Schema } = mongoose as unknown as typeof import("mongoose");
+  const verificationSchema = new Schema<VerificationDoc>(
+    {
+      token:     { type: String, required: true, unique: true },
+      userId:    { type: String, required: true },
+      email:     { type: String, required: true },
+      expiresAt: { type: Date,   required: true, index: { expireAfterSeconds: 0 } },
+    },
+    { collection: "email_verifications" }
+  );
+  return appConnection.model<VerificationDoc>("EmailVerification", verificationSchema);
 }
 
 // ---------------------------------------------------------------------------

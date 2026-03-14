@@ -9,7 +9,8 @@ import { isLimited, trackAttempt, bustAuthLimit } from "@lib/authRateLimit";
 import { getAuthAdapter } from "@lib/authAdapter";
 import { createRouter } from "@lib/context";
 import { getVerificationToken, deleteVerificationToken, createVerificationToken } from "@lib/emailVerification";
-import type { PrimaryField, EmailVerificationConfig } from "@lib/appConfig";
+import { createResetToken, consumeResetToken } from "@lib/resetPassword";
+import type { PrimaryField, EmailVerificationConfig, PasswordResetConfig } from "@lib/appConfig";
 import type { AuthRateLimitConfig } from "../app";
 import { getUserSessions, deleteSession } from "@lib/session";
 
@@ -32,10 +33,11 @@ const clientIp = (xff: string | undefined | null, xri: string | undefined | null
 export interface AuthRouterOptions {
   primaryField: PrimaryField;
   emailVerification?: EmailVerificationConfig;
+  passwordReset?: PasswordResetConfig;
   rateLimit?: AuthRateLimitConfig;
 }
 
-export const createAuthRouter = ({ primaryField, emailVerification, rateLimit }: AuthRouterOptions) => {
+export const createAuthRouter = ({ primaryField, emailVerification, passwordReset, rateLimit }: AuthRouterOptions) => {
   const router = createRouter();
   const RegisterSchema = makeRegisterSchema(primaryField);
   const LoginSchema = makeLoginSchema(primaryField);
@@ -47,6 +49,8 @@ export const createAuthRouter = ({ primaryField, emailVerification, rateLimit }:
   const registerOpts = { windowMs: rateLimit?.register?.windowMs            ?? 60 * 60 * 1000, max: rateLimit?.register?.max            ?? 5  };
   const verifyOpts   = { windowMs: rateLimit?.verifyEmail?.windowMs         ?? 15 * 60 * 1000, max: rateLimit?.verifyEmail?.max         ?? 10 };
   const resendOpts   = { windowMs: rateLimit?.resendVerification?.windowMs  ?? 60 * 60 * 1000, max: rateLimit?.resendVerification?.max  ?? 3  };
+  const forgotOpts   = { windowMs: rateLimit?.forgotPassword?.windowMs      ?? 15 * 60 * 1000, max: rateLimit?.forgotPassword?.max      ?? 5  };
+  const resetOpts    = { windowMs: rateLimit?.resetPassword?.windowMs       ?? 15 * 60 * 1000, max: rateLimit?.resetPassword?.max       ?? 10 };
 
   router.openapi(
     createRoute({
@@ -250,6 +254,80 @@ export const createAuthRouter = ({ primaryField, emailVerification, rateLimit }:
         const verificationToken = await createVerificationToken(authUserId, user.email);
         await emailVerification.onSend(user.email, verificationToken);
         return c.json({ message: "Verification email sent" }, 200);
+      }
+    );
+  }
+
+  // Password reset routes — only mounted when passwordReset is configured and primaryField is "email"
+  if (passwordReset && primaryField === "email") {
+    router.openapi(
+      createRoute({
+        method: "post",
+        path: "/auth/forgot-password",
+        tags,
+        request: { body: { content: { "application/json": { schema: z.object({ email: z.string().email() }) } } } },
+        responses: {
+          200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Reset email sent if account exists" },
+          400: { content: { "application/json": { schema: ErrorResponse } }, description: "Validation error" },
+          429: { content: { "application/json": { schema: ErrorResponse } }, description: "Too many attempts" },
+        },
+      }),
+      async (c) => {
+        const ip = clientIp(c.req.header("x-forwarded-for"), c.req.header("x-real-ip")) ?? "unknown";
+        if (await trackAttempt(`forgot:${ip}`, forgotOpts)) {
+          return c.json({ error: "Too many attempts. Try again later." }, 429);
+        }
+        const { email } = c.req.valid("json");
+        const adapter = getAuthAdapter();
+        const msg = { message: "If an account with that email exists, a reset link has been sent." };
+        // Look up user — fire-and-forget the email send so both paths return in constant time
+        const user = adapter.findByEmail ? await adapter.findByEmail(email) : null;
+        if (user) {
+          void (async () => {
+            try {
+              const token = await createResetToken(user.id, email);
+              await passwordReset.onSend(email, token);
+            } catch (err) {
+              console.error("Failed to send password reset email:", err);
+            }
+          })();
+        }
+        return c.json(msg, 200);
+      }
+    );
+
+    router.openapi(
+      createRoute({
+        method: "post",
+        path: "/auth/reset-password",
+        tags,
+        request: { body: { content: { "application/json": { schema: z.object({ token: z.string(), password: z.string().min(8) }) } } } },
+        responses: {
+          200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Password reset successfully" },
+          400: { content: { "application/json": { schema: ErrorResponse } }, description: "Invalid or expired token" },
+          429: { content: { "application/json": { schema: ErrorResponse } }, description: "Too many attempts" },
+          501: { content: { "application/json": { schema: ErrorResponse } }, description: "Not supported by adapter" },
+        },
+      }),
+      async (c) => {
+        const ip = clientIp(c.req.header("x-forwarded-for"), c.req.header("x-real-ip")) ?? "unknown";
+        if (await trackAttempt(`reset:${ip}`, resetOpts)) {
+          return c.json({ error: "Too many attempts. Try again later." }, 429);
+        }
+        const { token, password } = c.req.valid("json");
+        // consumeResetToken atomically gets and deletes — prevents concurrent replay
+        const entry = await consumeResetToken(token);
+        if (!entry) return c.json({ error: "Invalid or expired reset token" }, 400);
+        const adapter = getAuthAdapter();
+        if (!adapter.setPassword) {
+          return c.json({ error: "Auth adapter does not support setPassword" }, 501);
+        }
+        const passwordHash = await Bun.password.hash(password);
+        await adapter.setPassword(entry.userId, passwordHash);
+        // Revoke all sessions so stolen JWTs can't stay valid after a reset
+        const sessions = await getUserSessions(entry.userId);
+        await Promise.all(sessions.map((s) => deleteSession(s.sessionId)));
+        return c.json({ message: "Password reset successfully" }, 200);
       }
     );
   }
