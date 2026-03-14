@@ -26,14 +26,15 @@ let _authConn: Connection | null = null;
 let _appConn: Connection | null = null;
 let _mongoose: MongooseModule | null = null;
 
-function makeConnectionProxy(label: string, getConn: () => Connection | null): Connection {
+function makeConnectionProxy(label: string, getConn: () => Connection | null, setConn: (c: Connection) => void): Connection {
   return new Proxy({} as Connection, {
     get(_, prop) {
-      const conn = getConn();
+      let conn = getConn();
       if (!conn) {
-        throw new Error(
-          `MongoDB ${label} connection not initialized — call connect${label === "auth" ? "AuthMongo" : "AppMongo"}() or connectMongo() first`
-        );
+        // Lazily create a disconnected connection so appConnection.model() works at module
+        // load time. Mongoose buffers queries until openUri() is called by connectMongo().
+        conn = requireMongoose().createConnection();
+        setConn(conn);
       }
       const val = (conn as unknown as Record<string | symbol, unknown>)[prop];
       return typeof val === "function" ? (val as (...args: unknown[]) => unknown).bind(conn) : val;
@@ -45,14 +46,14 @@ function makeConnectionProxy(label: string, getConn: () => Connection | null): C
  * Named connection used exclusively for auth data (AuthUser model).
  * Connected via connectAuthMongo() or connectMongo() (backward compat).
  */
-export const authConnection: Connection = makeConnectionProxy("auth", () => _authConn);
+export const authConnection: Connection = makeConnectionProxy("auth", () => _authConn, (c) => { _authConn = c; });
 
 /**
  * Named connection for app/tenant data.
  * Connected via connectAppMongo() or connectMongo() (backward compat).
  * Use this when registering your own models: appConnection.model("Product", schema).
  */
-export const appConnection: Connection = makeConnectionProxy("app", () => _appConn);
+export const appConnection: Connection = makeConnectionProxy("app", () => _appConn, (c) => { _appConn = c; });
 
 /**
  * The mongoose instance. Available after connectMongo() / connectAuthMongo() is called.
