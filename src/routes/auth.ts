@@ -137,7 +137,7 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
       summary: "Get current user",
       description: "Returns the authenticated user's profile. Requires a valid session via cookie or x-user-token header.",
       tags,
-      security: [{ cookieAuth: [] }, { userToken: [] }],
+      security: [{ cookieAuth: [] as string[] }, { userToken: [] as string[] }],
       responses: {
         200: {
           content: {
@@ -173,7 +173,7 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
       summary: "Set or update password",
       description: "Sets or updates the password for the authenticated user. Useful for OAuth-only users who want to add a password. Requires a valid session.",
       tags,
-      security: [{ cookieAuth: [] }, { userToken: [] }],
+      security: [{ cookieAuth: [] as string[] }, { userToken: [] as string[] }],
       request: { body: { content: { "application/json": { schema: z.object({ password: z.string().min(8).describe("New password. Minimum 8 characters.") }) } }, description: "New password." } },
       responses: {
         200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Password updated successfully." },
@@ -254,7 +254,7 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
         summary: "Resend verification email",
         description: "Sends a new verification email to the authenticated user's address. Returns 400 if already verified. Rate-limited per user. Requires a valid session.",
         tags,
-        security: [{ cookieAuth: [] }, { userToken: [] }],
+        security: [{ cookieAuth: [] as string[] }, { userToken: [] as string[] }],
         responses: {
           200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Verification email sent." },
           400: { content: { "application/json": { schema: ErrorResponse } }, description: "Email is already verified, or no email address on file." },
@@ -401,7 +401,7 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
       summary: "List sessions",
       description: "Returns all sessions for the authenticated user. Includes inactive sessions when `sessionPolicy.includeInactiveSessions` is enabled. Requires a valid session.",
       tags,
-      security: [{ cookieAuth: [] }, { userToken: [] }],
+      security: [{ cookieAuth: [] as string[] }, { userToken: [] as string[] }],
       responses: {
         200: {
           content: { "application/json": { schema: z.object({ sessions: z.array(SessionInfoSchema) }) } },
@@ -424,7 +424,7 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
       summary: "Revoke a session",
       description: "Revokes a specific session by ID. Users can only revoke their own sessions. Useful for 'sign out of other devices' flows. Requires a valid session.",
       tags,
-      security: [{ cookieAuth: [] }, { userToken: [] }],
+      security: [{ cookieAuth: [] as string[] }, { userToken: [] as string[] }],
       request: { params: z.object({ sessionId: z.string().describe("UUID of the session to revoke.") }) },
       responses: {
         200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Session revoked successfully." },

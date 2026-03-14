@@ -57,11 +57,11 @@ export const login = async (identifier: string, password: string, metadata?: Ses
       throw new HttpError(403, "Email not verified");
     }
     await createSession(user.id, token, sessionId, metadata);
-    return { token, userId: user.id, email: user.email, emailVerified: verified, googleLinked };
+    return { token, userId: user.id, email: fullUser?.email, emailVerified: verified, googleLinked };
   }
 
   await createSession(user.id, token, sessionId, metadata);
-  return { token, userId: user.id, email: user.email, googleLinked };
+  return { token, userId: user.id, email: fullUser?.email, googleLinked };
 };
 
 export const logout = async (token: string | null) => {
