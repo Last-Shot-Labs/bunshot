@@ -60,8 +60,7 @@ export const appConnection: Connection = makeConnectionProxy("app", () => _appCo
 export const mongoose: MongooseModule = new Proxy({} as MongooseModule, {
   get(_, prop) {
     const mg = _mongoose ?? requireMongoose();
-    const val = (mg as unknown as Record<string | symbol, unknown>)[prop];
-    return typeof val === "function" ? (val as (...args: unknown[]) => unknown).bind(mg) : val;
+    return (mg as unknown as Record<string | symbol, unknown>)[prop];
   },
 });
 
