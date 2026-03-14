@@ -35,7 +35,7 @@ function makeConnectionProxy(label: string, getConn: () => Connection | null): C
           `MongoDB ${label} connection not initialized — call connect${label === "auth" ? "AuthMongo" : "AppMongo"}() or connectMongo() first`
         );
       }
-      const val = (conn as Record<string | symbol, unknown>)[prop];
+      const val = (conn as unknown as Record<string | symbol, unknown>)[prop];
       return typeof val === "function" ? (val as (...args: unknown[]) => unknown).bind(conn) : val;
     },
   });
