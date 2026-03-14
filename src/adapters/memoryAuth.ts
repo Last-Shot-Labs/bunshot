@@ -34,6 +34,7 @@ const _userSessionIds     = new Map<string, Set<string>>();          // userId â
 const _oauthStates        = new Map<string, { codeVerifier?: string; linkUserId?: string; expiresAt: number }>();
 const _cache              = new Map<string, { value: string; expiresAt?: number }>();
 const _verificationTokens = new Map<string, { userId: string; email: string; expiresAt: number }>();
+const _resetTokens        = new Map<string, { userId: string; email: string; expiresAt: number }>();
 
 /** Reset all in-memory state. Useful for test isolation. */
 export const clearMemoryStore = (): void => {
@@ -44,6 +45,7 @@ export const clearMemoryStore = (): void => {
   _oauthStates.clear();
   _cache.clear();
   _verificationTokens.clear();
+  _resetTokens.clear();
 };
 
 // ---------------------------------------------------------------------------
@@ -322,4 +324,27 @@ export const memoryGetVerificationToken = (token: string): { userId: string; ema
 
 export const memoryDeleteVerificationToken = (token: string): void => {
   _verificationTokens.delete(token);
+};
+
+// ---------------------------------------------------------------------------
+// Password reset token helpers (used by src/lib/resetPassword.ts)
+// ---------------------------------------------------------------------------
+
+export const memoryCreateResetToken = (token: string, userId: string, email: string, ttlSeconds: number): void => {
+  const now = Date.now();
+  // Opportunistically purge expired entries to prevent unbounded memory growth
+  for (const [k, v] of _resetTokens) {
+    if (v.expiresAt <= now) _resetTokens.delete(k);
+  }
+  _resetTokens.set(token, { userId, email, expiresAt: now + ttlSeconds * 1000 });
+};
+
+export const memoryConsumeResetToken = (hash: string): { userId: string; email: string } | null => {
+  const entry = _resetTokens.get(hash);
+  if (!entry || entry.expiresAt <= Date.now()) {
+    _resetTokens.delete(hash);
+    return null;
+  }
+  _resetTokens.delete(hash);
+  return { userId: entry.userId, email: entry.email };
 };

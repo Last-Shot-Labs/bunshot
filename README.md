@@ -127,6 +127,8 @@ That's it. Your app gets:
 | `DELETE /auth/sessions/:sessionId` | Revoke a specific session by ID (requires login) |
 | `POST /auth/verify-email` | Verify email with token (when `emailVerification` is configured) |
 | `POST /auth/resend-verification` | Resend verification email (requires login, when `emailVerification` is configured) |
+| `POST /auth/forgot-password` | Request a password reset email (when `passwordReset` is configured) |
+| `POST /auth/reset-password` | Reset password using a token from the reset email (when `passwordReset` is configured) |
 | `GET /health` | Health check |
 | `GET /docs` | Scalar API docs UI |
 | `GET /openapi.json` | OpenAPI spec |
@@ -766,11 +768,19 @@ await createServer({
         await resend.emails.send({ to: email, subject: "Verify your email", text: `Token: ${token}` });
       },
     },
+    passwordReset: {                        // optional — only active when primaryField is "email"
+      tokenExpiry: 60 * 60,                 // default: 3600 (1 hour) — token TTL in seconds
+      onSend: async (email, token) => {     // called by POST /auth/forgot-password — use any email provider
+        await resend.emails.send({ to: email, subject: "Reset your password", text: `Token: ${token}` });
+      },
+    },
     rateLimit: {                            // optional — built-in auth endpoint rate limiting
       login:              { windowMs: 15 * 60 * 1000, max: 10 }, // default: 10 failures / 15 min
       register:           { windowMs: 60 * 60 * 1000, max: 5  }, // default: 5 attempts / hour (per IP)
       verifyEmail:        { windowMs: 15 * 60 * 1000, max: 10 }, // default: 10 attempts / 15 min (per IP)
       resendVerification: { windowMs: 60 * 60 * 1000, max: 3  }, // default: 3 attempts / hour (per user)
+      forgotPassword:     { windowMs: 15 * 60 * 1000, max: 5  }, // default: 5 attempts / 15 min (per IP)
+      resetPassword:      { windowMs: 15 * 60 * 1000, max: 10 }, // default: 10 attempts / 15 min (per IP)
       store: "redis",                       // default: "redis" when Redis is enabled, else "memory"
     },
     sessionPolicy: {                        // optional — session concurrency and metadata
@@ -1036,6 +1046,8 @@ All built-in auth endpoints are rate-limited out of the box with sensible defaul
 | `POST /auth/register` | IP address | Every attempt | 5 / hour |
 | `POST /auth/verify-email` | IP address | Every attempt | 10 / 15 min |
 | `POST /auth/resend-verification` | User ID (authenticated) | Every attempt | 3 / hour |
+| `POST /auth/forgot-password` | IP address | Every attempt | 5 / 15 min |
+| `POST /auth/reset-password` | IP address | Every attempt | 10 / 15 min |
 
 Login is keyed by the **identifier being targeted** — an attacker rotating IPs to brute-force `alice@example.com` is blocked regardless of source IP. A successful login resets the counter so legitimate users aren't locked out.
 

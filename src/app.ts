@@ -139,6 +139,7 @@ export interface AuthConfig {
   /**
    * Password reset configuration. Only active when primaryField is "email".
    * Provide an onSend callback to send the reset email via any provider (Resend, SendGrid, etc.).
+   * Mounts POST /auth/forgot-password and POST /auth/reset-password.
    */
   passwordReset?: PasswordResetConfig;
   /** Rate limit configuration for built-in auth endpoints. */
@@ -295,6 +296,22 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
     authAdapter = mongoAuthAdapter;
   }
 
+  if (defaultRole && !authAdapter.setRoles) {
+    throw new Error(`createApp: "defaultRole" is set to "${defaultRole}" but the auth adapter does not implement setRoles. Add setRoles to your adapter or remove defaultRole.`);
+  }
+
+  if (emailVerification && primaryField !== "email") {
+    throw new Error(`createApp: "emailVerification" is only supported when primaryField is "email". Either set primaryField to "email" or remove emailVerification.`);
+  }
+
+  if (passwordReset && primaryField !== "email") {
+    throw new Error(`createApp: "passwordReset" is only supported when primaryField is "email". Either set primaryField to "email" or remove passwordReset.`);
+  }
+
+  if (passwordReset && !authAdapter.setPassword) {
+    throw new Error(`createApp: "passwordReset" is configured but the auth adapter does not implement setPassword. Add setPassword to your adapter or remove passwordReset.`);
+  }
+
   setAuthAdapter(authAdapter);
   setAppRoles(roles);
   setDefaultRole(defaultRole ?? null);
@@ -308,19 +325,6 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
   setPersistSessionMetadata(sessionPolicy.persistSessionMetadata ?? true);
   setIncludeInactiveSessions(sessionPolicy.includeInactiveSessions ?? false);
   setTrackLastActive(sessionPolicy.trackLastActive ?? false);
-
-  if (defaultRole && !authAdapter.setRoles) {
-    throw new Error(`createApp: "defaultRole" is set to "${defaultRole}" but the auth adapter does not implement setRoles. Add setRoles to your adapter or remove defaultRole.`);
-  }
-  if (emailVerification && primaryField !== "email") {
-    throw new Error(`createApp: "emailVerification" is only supported when primaryField is "email". Either set primaryField to "email" or remove emailVerification.`);
-  }
-  if (passwordReset && primaryField !== "email") {
-    throw new Error(`createApp: "passwordReset" is only supported when primaryField is "email". Either set primaryField to "email" or remove passwordReset.`);
-  }
-  if (passwordReset && !authAdapter.setPassword) {
-    throw new Error(`createApp: "passwordReset" is configured but the auth adapter does not implement setPassword. Add setPassword to your adapter or remove passwordReset.`);
-  }
 
   if (oauthProviders) initOAuthProviders(oauthProviders);
   const configuredOAuth = getConfiguredOAuthProviders();

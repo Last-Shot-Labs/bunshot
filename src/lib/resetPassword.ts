@@ -1,7 +1,8 @@
 import { createHash } from "crypto";
 import { getRedis } from "./redis";
-import { appConnection, mongoose } from "./mongo";
+import { appConnection } from "./mongo";
 import { getAppName, getResetTokenExpiry } from "./appConfig";
+import { Schema } from "mongoose";
 import {
   sqliteCreateResetToken,
   sqliteConsumeResetToken,
@@ -30,19 +31,19 @@ interface ResetDoc {
   expiresAt: Date;
 }
 
+const resetSchema = new Schema<ResetDoc>(
+  {
+    token:     { type: String, required: true, unique: true },
+    userId:    { type: String, required: true },
+    email:     { type: String, required: true },
+    expiresAt: { type: Date,   required: true, index: { expireAfterSeconds: 0 } },
+  },
+  { collection: "password_resets" }
+);
+
 function getResetModel() {
-  if (appConnection.models["PasswordReset"]) return appConnection.models["PasswordReset"];
-  const { Schema } = mongoose as unknown as typeof import("mongoose");
-  const resetSchema = new Schema<ResetDoc>(
-    {
-      token:     { type: String, required: true, unique: true },
-      userId:    { type: String, required: true },
-      email:     { type: String, required: true },
-      expiresAt: { type: Date,   required: true, index: { expireAfterSeconds: 0 } },
-    },
-    { collection: "password_resets" }
-  );
-  return appConnection.model<ResetDoc>("PasswordReset", resetSchema);
+  return appConnection.models["PasswordReset"] ??
+    appConnection.model<ResetDoc>("PasswordReset", resetSchema);
 }
 
 // ---------------------------------------------------------------------------
@@ -58,6 +59,7 @@ async function redisGetDel(key: string): Promise<string | null> {
     } catch (err: any) {
       const msg: string = err?.message ?? "";
       if (!/unknown command|ERR unknown command/i.test(msg)) throw err;
+      // Fall through to Lua on "unknown command"
     }
   }
   const result = await redis.eval(

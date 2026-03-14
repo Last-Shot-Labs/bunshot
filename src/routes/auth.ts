@@ -267,21 +267,25 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
         tags,
         request: { body: { content: { "application/json": { schema: z.object({ email: z.string().email() }) } } } },
         responses: {
-          200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Reset email sent if account exists" },
+          200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Reset email sent if address is registered" },
           400: { content: { "application/json": { schema: ErrorResponse } }, description: "Validation error" },
           429: { content: { "application/json": { schema: ErrorResponse } }, description: "Too many attempts" },
         },
       }),
       async (c) => {
         const ip = clientIp(c.req.header("x-forwarded-for"), c.req.header("x-real-ip")) ?? "unknown";
-        if (await trackAttempt(`forgot:${ip}`, forgotOpts)) {
+        const { email } = c.req.valid("json");
+        // Rate-limit by both IP and email to prevent distributed email-bombing
+        const ipLimited    = await trackAttempt(`forgot:ip:${ip}`, forgotOpts);
+        const emailLimited = await trackAttempt(`forgot:email:${email}`, forgotOpts);
+        if (ipLimited || emailLimited) {
           return c.json({ error: "Too many attempts. Try again later." }, 429);
         }
-        const { email } = c.req.valid("json");
         const adapter = getAuthAdapter();
-        const msg = { message: "If an account with that email exists, a reset link has been sent." };
-        // Look up user — fire-and-forget the email send so both paths return in constant time
-        const user = adapter.findByEmail ? await adapter.findByEmail(email) : null;
+        const user = await adapter.findByEmail(email);
+        // Fire-and-forget: the response does not wait for token creation or email sending,
+        // which reduces obvious timing differences between registered and unregistered emails.
+        const msg = { message: "If that email is registered, a password reset link has been sent." };
         if (user) {
           void (async () => {
             try {
@@ -304,7 +308,7 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
         request: { body: { content: { "application/json": { schema: z.object({ token: z.string(), password: z.string().min(8) }) } } } },
         responses: {
           200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Password reset successfully" },
-          400: { content: { "application/json": { schema: ErrorResponse } }, description: "Invalid or expired token" },
+          400: { content: { "application/json": { schema: ErrorResponse } }, description: "Validation error or invalid/expired token" },
           429: { content: { "application/json": { schema: ErrorResponse } }, description: "Too many attempts" },
           501: { content: { "application/json": { schema: ErrorResponse } }, description: "Not supported by adapter" },
         },

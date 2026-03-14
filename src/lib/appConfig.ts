@@ -9,11 +9,19 @@ export interface EmailVerificationConfig {
   onSend: (email: string, token: string) => Promise<void>;
 }
 
+export interface PasswordResetConfig {
+  /** Token time-to-live in seconds. Defaults to 3 600 (1 hour). */
+  tokenExpiry?: number;
+  /** Called with the user's email and the reset token. Use to send the reset email. */
+  onSend: (email: string, token: string) => Promise<void>;
+}
+
 let appName = "Core API";
 let appRoles: string[] = [];
 let defaultRole: string | null = null;
 let _primaryField: PrimaryField = "email";
 let _emailVerificationConfig: EmailVerificationConfig | null = null;
+let _passwordResetConfig: PasswordResetConfig | null = null;
 
 export const setAppName = (name: string) => { appName = name; };
 export const getAppName = () => appName;
@@ -32,6 +40,12 @@ export const getEmailVerificationConfig = () => _emailVerificationConfig;
 
 const DEFAULT_TOKEN_EXPIRY = 60 * 60 * 24; // 24 hours
 export const getTokenExpiry = (): number => _emailVerificationConfig?.tokenExpiry ?? DEFAULT_TOKEN_EXPIRY;
+
+export const setPasswordResetConfig = (config: PasswordResetConfig | null) => { _passwordResetConfig = config; };
+export const getPasswordResetConfig = () => _passwordResetConfig;
+
+const DEFAULT_RESET_TOKEN_EXPIRY = 60 * 60; // 1 hour
+export const getResetTokenExpiry = (): number => _passwordResetConfig?.tokenExpiry ?? DEFAULT_RESET_TOKEN_EXPIRY;
 
 // ---------------------------------------------------------------------------
 // Session policy
