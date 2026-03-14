@@ -413,6 +413,24 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
 
   app.notFound((c) => c.json({ error: "Not Found" }, 404));
 
+  app.openAPIRegistry.registerComponent("securitySchemes", "cookieAuth", {
+    type: "apiKey",
+    in: "cookie",
+    name: "token",
+    description: "Session cookie set automatically on login/register.",
+  });
+  app.openAPIRegistry.registerComponent("securitySchemes", "userToken", {
+    type: "apiKey",
+    in: "header",
+    name: "x-user-token",
+    description: "JWT session token passed as the x-user-token request header (alternative to the session cookie).",
+  });
+  app.openAPIRegistry.registerComponent("securitySchemes", "bearerAuth", {
+    type: "http",
+    scheme: "bearer",
+    description: "API key passed as Authorization: Bearer <token>. Required on all endpoints unless bearer auth is disabled in CreateAppConfig or the path is in the bypass list.",
+  });
+
   app.doc("/openapi.json", { openapi: "3.0.0", info: { title: appName, version: openApiVersion } });
   app.get("/docs", Scalar({ url: "/openapi.json" }));
   app.get("/sw.js", (c) => c.body("", 200, { "Content-Type": "application/javascript" }));

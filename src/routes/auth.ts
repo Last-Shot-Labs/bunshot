@@ -16,11 +16,11 @@ import { getUserSessions, deleteSession } from "@lib/session";
 
 const isProd = process.env.NODE_ENV === "production";
 const TokenResponse = z.object({
-  token: z.string(),
-  userId: z.string(),
-  email: z.string().optional(),
-  emailVerified: z.boolean().optional(),
-  googleLinked: z.boolean().optional(),
+  token: z.string().describe("JWT session token. Also set as an HttpOnly session cookie."),
+  userId: z.string().describe("Unique user ID."),
+  email: z.string().optional().describe("User's email address (present when primaryField is 'email')."),
+  emailVerified: z.boolean().optional().describe("Whether the email address has been verified (present when emailVerification is configured)."),
+  googleLinked: z.boolean().optional().describe("Whether a Google OAuth account is linked to this user."),
 });
 const ErrorResponse = z.object({ error: z.string() });
 const tags = ["Auth"];
@@ -62,13 +62,15 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
     createRoute({
       method: "post",
       path: "/auth/register",
+      summary: "Register a new account",
+      description: "Creates a new user account and returns a JWT session token. The token is also set as an HttpOnly session cookie. Rate-limited by IP.",
       tags,
-      request: { body: { content: { "application/json": { schema: RegisterSchema } } } },
+      request: { body: { content: { "application/json": { schema: RegisterSchema } }, description: "Registration credentials." } },
       responses: {
-        201: { content: { "application/json": { schema: TokenResponse } }, description: "Registered" },
-        400: { content: { "application/json": { schema: ErrorResponse } }, description: "Validation error" },
+        201: { content: { "application/json": { schema: TokenResponse } }, description: "Account created. Returns a session token." },
+        400: { content: { "application/json": { schema: ErrorResponse } }, description: "Validation error (e.g. missing field, password too short)." },
         409: { content: { "application/json": { schema: ErrorResponse } }, description: alreadyRegisteredMsg },
-        429: { content: { "application/json": { schema: ErrorResponse } }, description: "Too many attempts" },
+        429: { content: { "application/json": { schema: ErrorResponse } }, description: "Too many registration attempts from this IP. Try again later." },
       },
     }),
     async (c) => {
@@ -92,13 +94,15 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
     createRoute({
       method: "post",
       path: "/auth/login",
+      summary: "Log in",
+      description: "Authenticates with credentials and returns a JWT session token. The token is also set as an HttpOnly session cookie. Failed attempts are rate-limited per identifier.",
       tags,
-      request: { body: { content: { "application/json": { schema: LoginSchema } } } },
+      request: { body: { content: { "application/json": { schema: LoginSchema } }, description: "Login credentials." } },
       responses: {
-        200: { content: { "application/json": { schema: TokenResponse } }, description: "Logged in" },
-        401: { content: { "application/json": { schema: ErrorResponse } }, description: "Invalid credentials" },
-        403: { content: { "application/json": { schema: ErrorResponse } }, description: "Email not verified" },
-        429: { content: { "application/json": { schema: ErrorResponse } }, description: "Too many attempts" },
+        200: { content: { "application/json": { schema: TokenResponse } }, description: "Authenticated. Returns a session token." },
+        401: { content: { "application/json": { schema: ErrorResponse } }, description: "Invalid credentials." },
+        403: { content: { "application/json": { schema: ErrorResponse } }, description: "Email not verified. Verification is required before login." },
+        429: { content: { "application/json": { schema: ErrorResponse } }, description: "Too many failed login attempts for this identifier. Try again later." },
       },
     }),
     async (c) => {
@@ -130,22 +134,25 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
     createRoute({
       method: "get",
       path: "/auth/me",
+      summary: "Get current user",
+      description: "Returns the authenticated user's profile. Requires a valid session via cookie or x-user-token header.",
       tags,
+      security: [{ cookieAuth: [] }, { userToken: [] }],
       responses: {
         200: {
           content: {
             "application/json": {
               schema: z.object({
-                userId: z.string(),
-                email: z.string().optional(),
-                emailVerified: z.boolean().optional(),
-                googleLinked: z.boolean().optional(),
+                userId: z.string().describe("Unique user ID."),
+                email: z.string().optional().describe("User's email address."),
+                emailVerified: z.boolean().optional().describe("Whether the email address has been verified."),
+                googleLinked: z.boolean().optional().describe("Whether a Google OAuth account is linked."),
               }),
             },
           },
-          description: "Current user",
+          description: "Authenticated user's profile.",
         },
-        401: { content: { "application/json": { schema: ErrorResponse } }, description: "Unauthorized" },
+        401: { content: { "application/json": { schema: ErrorResponse } }, description: "No valid session." },
       },
     }),
     async (c) => {
@@ -163,12 +170,16 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
     createRoute({
       method: "post",
       path: "/auth/set-password",
+      summary: "Set or update password",
+      description: "Sets or updates the password for the authenticated user. Useful for OAuth-only users who want to add a password. Requires a valid session.",
       tags,
-      request: { body: { content: { "application/json": { schema: z.object({ password: z.string().min(8) }) } } } },
+      security: [{ cookieAuth: [] }, { userToken: [] }],
+      request: { body: { content: { "application/json": { schema: z.object({ password: z.string().min(8).describe("New password. Minimum 8 characters.") }) } }, description: "New password." } },
       responses: {
-        200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Password set" },
-        400: { content: { "application/json": { schema: ErrorResponse } }, description: "Validation error" },
-        501: { content: { "application/json": { schema: ErrorResponse } }, description: "Not supported by adapter" },
+        200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Password updated successfully." },
+        400: { content: { "application/json": { schema: ErrorResponse } }, description: "Validation error (e.g. password too short)." },
+        401: { content: { "application/json": { schema: ErrorResponse } }, description: "No valid session." },
+        501: { content: { "application/json": { schema: ErrorResponse } }, description: "The configured auth adapter does not support setPassword." },
       },
     }),
     async (c) => {
@@ -188,9 +199,11 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
     createRoute({
       method: "post",
       path: "/auth/logout",
+      summary: "Log out",
+      description: "Invalidates the current session and clears the session cookie. Safe to call even without an active session.",
       tags,
       responses: {
-        200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Logged out" },
+        200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Logged out. Session is invalidated and cookie is cleared." },
       },
     }),
     async (c) => {
@@ -207,12 +220,14 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
       createRoute({
         method: "post",
         path: "/auth/verify-email",
+        summary: "Verify email address",
+        description: "Consumes a single-use email verification token and marks the account as verified. The token is delivered by the `emailVerification.onSend` callback configured in CreateAppConfig. Rate-limited by IP.",
         tags,
-        request: { body: { content: { "application/json": { schema: z.object({ token: z.string() }) } } } },
+        request: { body: { content: { "application/json": { schema: z.object({ token: z.string().describe("Single-use verification token received via email.") }) } }, description: "Verification token." } },
         responses: {
-          200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Email verified" },
-          400: { content: { "application/json": { schema: ErrorResponse } }, description: "Invalid or expired token" },
-          429: { content: { "application/json": { schema: ErrorResponse } }, description: "Too many attempts" },
+          200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Email verified successfully." },
+          400: { content: { "application/json": { schema: ErrorResponse } }, description: "Invalid or expired verification token." },
+          429: { content: { "application/json": { schema: ErrorResponse } }, description: "Too many verification attempts from this IP. Try again later." },
         },
       }),
       async (c) => {
@@ -236,12 +251,16 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
       createRoute({
         method: "post",
         path: "/auth/resend-verification",
+        summary: "Resend verification email",
+        description: "Sends a new verification email to the authenticated user's address. Returns 400 if already verified. Rate-limited per user. Requires a valid session.",
         tags,
+        security: [{ cookieAuth: [] }, { userToken: [] }],
         responses: {
-          200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Verification email sent" },
-          400: { content: { "application/json": { schema: ErrorResponse } }, description: "Already verified" },
-          429: { content: { "application/json": { schema: ErrorResponse } }, description: "Too many attempts" },
-          501: { content: { "application/json": { schema: ErrorResponse } }, description: "Not supported by adapter" },
+          200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Verification email sent." },
+          400: { content: { "application/json": { schema: ErrorResponse } }, description: "Email is already verified, or no email address on file." },
+          401: { content: { "application/json": { schema: ErrorResponse } }, description: "No valid session." },
+          429: { content: { "application/json": { schema: ErrorResponse } }, description: "Too many resend attempts for this user. Try again later." },
+          501: { content: { "application/json": { schema: ErrorResponse } }, description: "The configured auth adapter does not support email verification." },
         },
       }),
       async (c) => {
@@ -270,12 +289,14 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
       createRoute({
         method: "post",
         path: "/auth/forgot-password",
+        summary: "Request password reset",
+        description: "Sends a password reset email if the address is registered. Always returns 200 regardless of whether the address exists, to prevent email enumeration. Rate-limited by both IP and email address.",
         tags,
-        request: { body: { content: { "application/json": { schema: z.object({ email: z.string().email() }) } } } },
+        request: { body: { content: { "application/json": { schema: z.object({ email: z.string().email().describe("Email address to send the reset link to.") }) } }, description: "Email address for the account to reset." } },
         responses: {
-          200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Reset email sent if address is registered" },
-          400: { content: { "application/json": { schema: ErrorResponse } }, description: "Validation error" },
-          429: { content: { "application/json": { schema: ErrorResponse } }, description: "Too many attempts" },
+          200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Request received. A reset email will be sent if the address is registered." },
+          400: { content: { "application/json": { schema: ErrorResponse } }, description: "Validation error (e.g. not a valid email address)." },
+          429: { content: { "application/json": { schema: ErrorResponse } }, description: "Too many attempts from this IP or for this email address. Try again later." },
         },
       }),
       async (c) => {
@@ -310,13 +331,27 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
       createRoute({
         method: "post",
         path: "/auth/reset-password",
+        summary: "Reset password",
+        description: "Consumes a single-use reset token and sets a new password. All active sessions are revoked after a successful reset to invalidate any stolen JWTs. Rate-limited by IP.",
         tags,
-        request: { body: { content: { "application/json": { schema: z.object({ token: z.string(), password: z.string().min(8) }) } } } },
+        request: {
+          body: {
+            content: {
+              "application/json": {
+                schema: z.object({
+                  token: z.string().describe("Single-use reset token received via email."),
+                  password: z.string().min(8).describe("New password. Minimum 8 characters."),
+                }),
+              },
+            },
+            description: "Reset token and new password.",
+          },
+        },
         responses: {
-          200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Password reset successfully" },
-          400: { content: { "application/json": { schema: ErrorResponse } }, description: "Validation error or invalid/expired token" },
-          429: { content: { "application/json": { schema: ErrorResponse } }, description: "Too many attempts" },
-          501: { content: { "application/json": { schema: ErrorResponse } }, description: "Not supported by adapter" },
+          200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Password reset. All sessions have been revoked." },
+          400: { content: { "application/json": { schema: ErrorResponse } }, description: "Validation error, or the reset token is invalid or expired." },
+          429: { content: { "application/json": { schema: ErrorResponse } }, description: "Too many reset attempts from this IP. Try again later." },
+          501: { content: { "application/json": { schema: ErrorResponse } }, description: "The configured auth adapter does not support setPassword." },
         },
       }),
       async (c) => {
@@ -347,13 +382,13 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
   // ---------------------------------------------------------------------------
 
   const SessionInfoSchema = z.object({
-    sessionId:    z.string(),
-    createdAt:    z.number(),
-    lastActiveAt: z.number(),
-    expiresAt:    z.number(),
-    ipAddress:    z.string().optional(),
-    userAgent:    z.string().optional(),
-    isActive:     z.boolean(),
+    sessionId:    z.string().describe("Unique session identifier (UUID)."),
+    createdAt:    z.number().describe("Unix timestamp (ms) when the session was created."),
+    lastActiveAt: z.number().describe("Unix timestamp (ms) of the most recent authenticated request (updated when trackLastActive is enabled)."),
+    expiresAt:    z.number().describe("Unix timestamp (ms) when the session expires."),
+    ipAddress:    z.string().optional().describe("IP address of the client at session creation."),
+    userAgent:    z.string().optional().describe("User-agent string of the client at session creation."),
+    isActive:     z.boolean().describe("Whether the session is currently valid and unexpired."),
   });
 
   router.use("/auth/sessions", userAuth);
@@ -363,13 +398,16 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
     createRoute({
       method: "get",
       path: "/auth/sessions",
+      summary: "List sessions",
+      description: "Returns all sessions for the authenticated user. Includes inactive sessions when `sessionPolicy.includeInactiveSessions` is enabled. Requires a valid session.",
       tags,
+      security: [{ cookieAuth: [] }, { userToken: [] }],
       responses: {
         200: {
           content: { "application/json": { schema: z.object({ sessions: z.array(SessionInfoSchema) }) } },
-          description: "List of sessions for the current user",
+          description: "Sessions belonging to the authenticated user.",
         },
-        401: { content: { "application/json": { schema: ErrorResponse } }, description: "Unauthorized" },
+        401: { content: { "application/json": { schema: ErrorResponse } }, description: "No valid session." },
       },
     }),
     async (c) => {
@@ -383,12 +421,15 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
     createRoute({
       method: "delete",
       path: "/auth/sessions/{sessionId}",
+      summary: "Revoke a session",
+      description: "Revokes a specific session by ID. Users can only revoke their own sessions. Useful for 'sign out of other devices' flows. Requires a valid session.",
       tags,
-      request: { params: z.object({ sessionId: z.string() }) },
+      security: [{ cookieAuth: [] }, { userToken: [] }],
+      request: { params: z.object({ sessionId: z.string().describe("UUID of the session to revoke.") }) },
       responses: {
-        200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Session revoked" },
-        401: { content: { "application/json": { schema: ErrorResponse } }, description: "Unauthorized" },
-        404: { content: { "application/json": { schema: ErrorResponse } }, description: "Session not found" },
+        200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Session revoked successfully." },
+        401: { content: { "application/json": { schema: ErrorResponse } }, description: "No valid session." },
+        404: { content: { "application/json": { schema: ErrorResponse } }, description: "Session not found or does not belong to the authenticated user." },
       },
     }),
     async (c) => {
