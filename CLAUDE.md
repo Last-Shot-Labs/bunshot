@@ -30,6 +30,8 @@ This is a **Bun + Hono API framework library** that consuming projects install a
 
 **Route auto-discovery:** Consuming projects place routes in a `routes/` directory. The framework scans and registers them automatically. Routes use `@hono/zod-openapi` for type-safe OpenAPI definitions. Load order can be controlled by exporting `export const priority = <number>` from a route file (lower = loaded first; files without it load last).
 
+**OpenAPI schema auto-registration:** Import `createRoute` from `@lastshotlabs/bunshot` (not from `@hono/zod-openapi` directly). The bunshot wrapper automatically calls `.openapi(name)` on any unnamed request body or response schema before passing through to the underlying `createRoute`, so every schema appears as a named component in `components/schemas` rather than being inlined. Generated names follow `{Method}{PathSegments}Body` / `{Method}{PathSegments}{StatusCode}` (e.g. `PostLedgerItemsBody`, `GetLedgerItemsById200`). Schemas already named via `.openapi("Name")` are never overwritten. Implementation: `src/lib/createRoute.ts`.
+
 **Worker auto-discovery:** BullMQ workers are placed in a `workers/` directory and auto-started by `createServer`.
 
 **Auth flow:** `src/services/auth.ts` orchestrates login/register/logout. The auth store is pluggable via `AuthAdapter` interface (default: `src/adapters/mongoAuth.ts`). Sessions can be stored in Redis, MongoDB, SQLite, or memory — configured via `db.sessions` in `CreateAppConfig`. Each login creates an independent session (keyed by UUID `sessionId` embedded in the JWT as the `sid` claim), so multiple devices stay logged in simultaneously. Session concurrency, metadata persistence, and `lastActiveAt` tracking are controlled via `auth.sessionPolicy`. Login identifier is configurable via `auth.primaryField` (`"email"` | `"username"` | `"phone"`). Email verification is opt-in via `auth.emailVerification` (supports `required: true` to block login until verified, `tokenExpiry` in seconds to control token TTL — defaults to 24 hours). Password reset is opt-in via `auth.passwordReset` (`onSend` callback receives email + token; `tokenExpiry` in seconds — defaults to 1 hour); mounts `POST /auth/forgot-password` and `POST /auth/reset-password`, both rate-limited by IP.
@@ -50,6 +52,7 @@ This is a **Bun + Hono API framework library** that consuming projects install a
 | `rateLimit.ts` | Per-key rate limiting; exports `trackAttempt`, `isLimited`, `bustAuthLimit` for use in custom routes |
 | `resetPassword.ts` | Password reset token CRUD — `createResetToken`, `consumeResetToken`; 4-backend (redis/mongo/sqlite/memory); store set via `setPasswordResetStore` |
 | `ws.ts` | WebSocket room registry, pub/sub helpers (`publish`, `subscribe`, `unsubscribe`, `getSubscriptions`, `handleRoomActions`, `getRooms`, `getRoomSubscribers`) — in-memory, no DB dependency |
+| `createRoute.ts` | Wraps `@hono/zod-openapi`'s `createRoute` to auto-register unnamed request/response schemas as named OpenAPI components; re-exported as the primary `createRoute` from the package |
 
 ### Middleware (`src/middleware/`)
 

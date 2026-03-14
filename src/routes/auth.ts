@@ -1,4 +1,4 @@
-import { createRoute } from "@hono/zod-openapi";
+import { createRoute, withSecurity } from "@lib/createRoute";
 import { z } from "zod";
 import { setCookie, getCookie, deleteCookie } from "hono/cookie";
 import * as AuthService from "@services/auth";
@@ -131,13 +131,12 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
   router.use("/auth/me", userAuth);
 
   router.openapi(
-    createRoute({
+    withSecurity(createRoute({
       method: "get",
       path: "/auth/me",
       summary: "Get current user",
       description: "Returns the authenticated user's profile. Requires a valid session via cookie or x-user-token header.",
       tags,
-      security: [{ cookieAuth: [] as string[] }, { userToken: [] as string[] }],
       responses: {
         200: {
           content: {
@@ -154,7 +153,7 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
         },
         401: { content: { "application/json": { schema: ErrorResponse } }, description: "No valid session." },
       },
-    }),
+    }), { cookieAuth: [] }, { userToken: [] }),
     async (c) => {
       const authUserId = c.get("authUserId")!;
       const adapter = getAuthAdapter();
@@ -167,13 +166,12 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
   router.use("/auth/set-password", userAuth);
 
   router.openapi(
-    createRoute({
+    withSecurity(createRoute({
       method: "post",
       path: "/auth/set-password",
       summary: "Set or update password",
       description: "Sets or updates the password for the authenticated user. Useful for OAuth-only users who want to add a password. Requires a valid session.",
       tags,
-      security: [{ cookieAuth: [] as string[] }, { userToken: [] as string[] }],
       request: { body: { content: { "application/json": { schema: z.object({ password: z.string().min(8).describe("New password. Minimum 8 characters.") }) } }, description: "New password." } },
       responses: {
         200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Password updated successfully." },
@@ -181,7 +179,7 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
         401: { content: { "application/json": { schema: ErrorResponse } }, description: "No valid session." },
         501: { content: { "application/json": { schema: ErrorResponse } }, description: "The configured auth adapter does not support setPassword." },
       },
-    }),
+    }), { cookieAuth: [] }, { userToken: [] }),
     async (c) => {
       const adapter = getAuthAdapter();
       if (!adapter.setPassword) {
@@ -248,13 +246,12 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
     router.use("/auth/resend-verification", userAuth);
 
     router.openapi(
-      createRoute({
+      withSecurity(createRoute({
         method: "post",
         path: "/auth/resend-verification",
         summary: "Resend verification email",
         description: "Sends a new verification email to the authenticated user's address. Returns 400 if already verified. Rate-limited per user. Requires a valid session.",
         tags,
-        security: [{ cookieAuth: [] as string[] }, { userToken: [] as string[] }],
         responses: {
           200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Verification email sent." },
           400: { content: { "application/json": { schema: ErrorResponse } }, description: "Email is already verified, or no email address on file." },
@@ -262,7 +259,7 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
           429: { content: { "application/json": { schema: ErrorResponse } }, description: "Too many resend attempts for this user. Try again later." },
           501: { content: { "application/json": { schema: ErrorResponse } }, description: "The configured auth adapter does not support email verification." },
         },
-      }),
+      }), { cookieAuth: [] }, { userToken: [] }),
       async (c) => {
         const adapter = getAuthAdapter();
         if (!adapter.getEmailVerified || !adapter.getUser) {
@@ -395,13 +392,12 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
   router.use("/auth/sessions/*", userAuth);
 
   router.openapi(
-    createRoute({
+    withSecurity(createRoute({
       method: "get",
       path: "/auth/sessions",
       summary: "List sessions",
       description: "Returns all sessions for the authenticated user. Includes inactive sessions when `sessionPolicy.includeInactiveSessions` is enabled. Requires a valid session.",
       tags,
-      security: [{ cookieAuth: [] as string[] }, { userToken: [] as string[] }],
       responses: {
         200: {
           content: { "application/json": { schema: z.object({ sessions: z.array(SessionInfoSchema) }) } },
@@ -409,7 +405,7 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
         },
         401: { content: { "application/json": { schema: ErrorResponse } }, description: "No valid session." },
       },
-    }),
+    }), { cookieAuth: [] }, { userToken: [] }),
     async (c) => {
       const userId = c.get("authUserId")!;
       const sessions = await getUserSessions(userId);
@@ -418,20 +414,19 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
   );
 
   router.openapi(
-    createRoute({
+    withSecurity(createRoute({
       method: "delete",
       path: "/auth/sessions/{sessionId}",
       summary: "Revoke a session",
       description: "Revokes a specific session by ID. Users can only revoke their own sessions. Useful for 'sign out of other devices' flows. Requires a valid session.",
       tags,
-      security: [{ cookieAuth: [] as string[] }, { userToken: [] as string[] }],
       request: { params: z.object({ sessionId: z.string().describe("UUID of the session to revoke.") }) },
       responses: {
         200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Session revoked successfully." },
         401: { content: { "application/json": { schema: ErrorResponse } }, description: "No valid session." },
         404: { content: { "application/json": { schema: ErrorResponse } }, description: "Session not found or does not belong to the authenticated user." },
       },
-    }),
+    }), { cookieAuth: [] }, { userToken: [] }),
     async (c) => {
       const userId = c.get("authUserId")!;
       const { sessionId } = c.req.valid("param");

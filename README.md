@@ -142,9 +142,8 @@ Drop a file in your `routes/` directory. It must export a `router`:
 
 ```ts
 // src/routes/products.ts
-import { createRoute } from "@hono/zod-openapi";
 import { z } from "zod";
-import { createRouter, userAuth } from "@lastshotlabs/bunshot";
+import { createRoute, createRouter, userAuth } from "@lastshotlabs/bunshot";
 
 export const router = createRouter();
 
@@ -177,6 +176,8 @@ routes/
     list.ts
     detail.ts
 ```
+
+**OpenAPI schema components:** Import `createRoute` from `@lastshotlabs/bunshot` (not from `@hono/zod-openapi`). The bunshot wrapper automatically registers all unnamed request body and response schemas as named entries in `components/schemas`, so the spec stays clean and code-gen tools can produce reusable types. Generated names follow the pattern `{Method}{Path}Body` / `{Method}{Path}{StatusCode}` (e.g. `PostProductsBody`, `GetProductsById200`). Schemas you explicitly name via `.openapi("MyName")` are never overwritten.
 
 **Load order:** By default, routes load in filesystem order. If a route needs to be registered before another (e.g. for Hono's first-match-wins routing), export a `priority` number — lower values load first. Routes without a `priority` load last.
 
@@ -1564,7 +1565,7 @@ import {
   cacheResponse, bustCache, bustCachePattern, setCacheStore,  // response caching
 
   // Utilities
-  HttpError, log, validate, createRouter,
+  HttpError, log, validate, createRouter, createRoute,
   getAppRoles,                                    // returns the valid roles list configured at startup
 
   // Constants
