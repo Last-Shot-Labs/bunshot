@@ -16,6 +16,10 @@ delete process.env.REDIS_PW_DEV;
 process.env.MONGO_HOST_DEV = "localhost:27018";
 process.env.MONGO_DB_DEV = "bunshot_test";
 
+// Disable Mongoose autoIndex globally — indexes are created explicitly in flushTestServices
+// to avoid race conditions where autoIndex runs asynchronously and create() hangs.
+try { require("mongoose").set("autoIndex", false); } catch {}
+
 // Re-export everything from setup.ts so memory tests work unchanged
 export { createTestApp, authHeader, clearMemoryStore } from "./setup";
 
@@ -33,8 +37,8 @@ const MONGO_URI = "mongodb://localhost:27018/bunshot_test";
 let _redisConnected = false;
 let _mongoConnected = false;
 
-// Cache known collection names to avoid calling listCollections() on every beforeEach
-let _knownCollections: string[] | null = null;
+// Track which models have had their indexes created
+const _indexedModels = new Set<string>();
 
 /** Connect to Docker Redis (port 6380). Idempotent. */
 export async function connectTestRedis(): Promise<void> {
@@ -53,10 +57,25 @@ export async function connectTestMongo(): Promise<void> {
   if (needsAuth) await authConnection.openUri(MONGO_URI);
   if (needsApp)  await appConnection.openUri(MONGO_URI);
   _mongoConnected = true;
-  _knownCollections = null; // Reset cache on reconnect
 }
 
-/** Flush all test data. Uses deleteMany to preserve indexes (avoids autoIndex race).
+/** Create indexes for any newly registered models (runs once per model). */
+async function ensureNewIndexes(): Promise<void> {
+  for (const name of authConnection.modelNames()) {
+    if (!_indexedModels.has(`auth:${name}`)) {
+      await authConnection.model(name).createIndexes();
+      _indexedModels.add(`auth:${name}`);
+    }
+  }
+  for (const name of appConnection.modelNames()) {
+    if (!_indexedModels.has(`app:${name}`)) {
+      await appConnection.model(name).createIndexes();
+      _indexedModels.add(`app:${name}`);
+    }
+  }
+}
+
+/** Flush all test data. Uses deleteMany to preserve indexes.
  *  Includes safety guards to prevent wiping non-test services. */
 export async function flushTestServices(): Promise<void> {
   // Redis safety guard
@@ -79,13 +98,12 @@ export async function flushTestServices(): Promise<void> {
         `SAFETY: Expected MongoDB database "${EXPECTED_MONGO_DB}", got "${dbName}". Refusing to drop collections.`
       );
     }
-    // Use deleteMany (not dropCollection) to preserve indexes — avoids autoIndex race
-    // where Mongoose recreates indexes asynchronously and create() hangs.
-    if (!_knownCollections) {
-      _knownCollections = (await authConnection.db!.listCollections().toArray()).map((c) => c.name);
-    }
+    // Ensure indexes exist for any newly registered models (once per model)
+    await ensureNewIndexes();
+    // Use deleteMany (not dropCollection) to preserve indexes
+    const collections = await authConnection.db!.listCollections().toArray();
     await Promise.all(
-      _knownCollections.map((name) => authConnection.db!.collection(name).deleteMany({}))
+      collections.map((c) => authConnection.db!.collection(c.name).deleteMany({}))
     );
   }
 }

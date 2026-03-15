@@ -19,16 +19,29 @@ export const cors: Middleware = async (req, next) => {
 
 function corsHeaders(requestOrigin: string | null): Record<string, string> {
   let allowOrigin: string;
+  let withCredentials = false;
   if (_allowedOrigins === "*") {
     allowOrigin = "*";
   } else {
     const origins = Array.isArray(_allowedOrigins) ? _allowedOrigins : [_allowedOrigins];
-    allowOrigin = requestOrigin && origins.includes(requestOrigin) ? requestOrigin : origins[0];
+    // Filter out "*" — wildcard is incompatible with credentials
+    const specific = origins.filter((o) => o !== "*");
+    if (requestOrigin && specific.includes(requestOrigin)) {
+      allowOrigin = requestOrigin;
+      withCredentials = true;
+    } else if (origins.includes("*")) {
+      // Fallback: reflect the request origin so credentials still work
+      allowOrigin = requestOrigin ?? "*";
+      withCredentials = !!requestOrigin;
+    } else {
+      allowOrigin = specific[0] ?? "*";
+    }
   }
   return {
     "Access-Control-Allow-Origin": allowOrigin,
     "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, x-user-token, x-csrf-token, x-refresh-token",
+    ...(withCredentials ? { "Access-Control-Allow-Credentials": "true" } : {}),
     ...(allowOrigin !== "*" ? { Vary: "Origin" } : {}),
   };
 }

@@ -37,7 +37,12 @@ describe("mongoAuthAdapter", () => {
 
     it("throws 409 on duplicate email", async () => {
       await mongoAuthAdapter.create("dup@example.com", "pw1");
-      await expect(mongoAuthAdapter.create("dup@example.com", "pw2")).rejects.toThrow("Email already registered");
+      try {
+        await mongoAuthAdapter.create("dup@example.com", "pw2");
+        throw new Error("Expected duplicate to throw");
+      } catch (err: any) {
+        expect(err.message).toContain("Email already registered");
+      }
     });
   });
 
@@ -107,9 +112,12 @@ describe("mongoAuthAdapter", () => {
 
     it("throws 409 if email belongs to credential account", async () => {
       await mongoAuthAdapter.create("cred@example.com", "pw");
-      await expect(
-        mongoAuthAdapter.findOrCreateByProvider!("google", "gid-789", { email: "cred@example.com" })
-      ).rejects.toThrow("An account with this email already exists");
+      try {
+        await mongoAuthAdapter.findOrCreateByProvider!("google", "gid-789", { email: "cred@example.com" });
+        throw new Error("Expected 409 to throw");
+      } catch (err: any) {
+        expect(err.message).toContain("An account with this email already exists");
+      }
     });
   });
 
@@ -137,9 +145,12 @@ describe("mongoAuthAdapter", () => {
     });
 
     it("throws 404 for non-existent user", async () => {
-      await expect(
-        mongoAuthAdapter.linkProvider!("000000000000000000000000", "google", "gid")
-      ).rejects.toThrow("User not found");
+      try {
+        await mongoAuthAdapter.linkProvider!("000000000000000000000000", "google", "gid");
+        throw new Error("Expected 404 to throw");
+      } catch (err: any) {
+        expect(err.message).toContain("User not found");
+      }
     });
   });
 

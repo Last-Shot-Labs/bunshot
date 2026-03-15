@@ -13,12 +13,15 @@ bun run dev     # Watch mode (hot reload)
 bun run start   # Run without watch
 bun run readme  # Compile README.md from docs/sections/ (default profile — all full)
 bun run readme:npm  # Compile with npm profile (overview variants for large sections)
-bun test                       # Run all tests
+bun run test                   # Run all tests (unit + integration + isolated)
 bun test tests/unit            # Unit tests only
 bun test tests/integration     # Integration tests only
+bun test tests/isolated        # Isolated tests (mock optional deps, must run separately)
 ```
 
 Tests use Bun's native test runner with all-memory stores (no Docker, databases, or external services). `bunfig.toml` preloads `tests/setup.ts` to set env vars before module initialization. Test files live in `tests/` (not in `src/`). Call `clearMemoryStore()` in `beforeEach` for full test isolation.
+
+**`tests/isolated/`** — Tests that use `mock.module()` to simulate missing optional dependencies. These run in a separate `bun test` invocation because module mocks leak across files within a single test run. The `bun run test` script chains them automatically.
 
 ### Modular README
 
