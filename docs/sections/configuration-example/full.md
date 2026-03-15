@@ -61,6 +61,11 @@ const auth: AuthConfig = {
         clientSecret: process.env.MICROSOFT_CLIENT_SECRET!,
         redirectUri: `http://localhost:${process.env.PORT ?? 3000}/auth/microsoft/callback`,
       },
+      github: {
+        clientId: process.env.GITHUB_CLIENT_ID!,
+        clientSecret: process.env.GITHUB_CLIENT_SECRET!,
+        redirectUri: `http://localhost:${process.env.PORT ?? 3000}/auth/github/callback`,
+      },
     },
   },
 };

@@ -1,6 +1,6 @@
 ## Social Login (OAuth)
 
-Pass `auth.oauth.providers` to `createServer` to enable Google, Apple, and/or Microsoft sign-in. Routes are mounted automatically for each configured provider.
+Pass `auth.oauth.providers` to `createServer` to enable Google, Apple, Microsoft, and/or GitHub sign-in. Routes are mounted automatically for each configured provider.
 
 ```ts
 await createServer({
@@ -28,6 +28,11 @@ await createServer({
           clientSecret: process.env.MICROSOFT_CLIENT_SECRET!,
           redirectUri: "https://myapp.com/auth/microsoft/callback",
         },
+        github: {
+          clientId: process.env.GITHUB_CLIENT_ID!,
+          clientSecret: process.env.GITHUB_CLIENT_SECRET!,
+          redirectUri: "https://myapp.com/auth/github/callback",
+        },
       },
     },
   },
@@ -41,10 +46,13 @@ await createServer({
 | Google | `GET /auth/google` | `GET /auth/google/callback` | `GET /auth/google/link` | `DELETE /auth/google/link` |
 | Apple | `GET /auth/apple` | `POST /auth/apple/callback` | `GET /auth/apple/link` | — |
 | Microsoft | `GET /auth/microsoft` | `GET /auth/microsoft/callback` | `GET /auth/microsoft/link` | `DELETE /auth/microsoft/link` |
+| GitHub | `GET /auth/github` | `GET /auth/github/callback` | `GET /auth/github/link` | `DELETE /auth/github/link` |
 
 > Apple sends its callback as a **POST** with form data. Your server must be publicly reachable and the redirect URI must be registered in the Apple developer console.
 
 > **Microsoft `tenantId` options:** `"common"` accepts any Microsoft account (personal + work/school), `"organizations"` accepts work/school accounts only, `"consumers"` accepts personal accounts only, or pass a specific tenant GUID to restrict to a single Azure AD tenant (recommended for company SSO).
+
+> **GitHub:** Create an OAuth App (not a GitHub App) at [github.com/settings/developers](https://github.com/settings/developers). The `user:email` scope is requested to retrieve the user's verified email address, since the primary `/user` endpoint may not return it for users with private email settings.
 
 Additionally, a shared code exchange endpoint is always mounted:
 
@@ -54,7 +62,7 @@ Additionally, a shared code exchange endpoint is always mounted:
 
 ### Flow
 
-1. Client navigates to `GET /auth/google` (or `/auth/apple`, `/auth/microsoft`)
+1. Client navigates to `GET /auth/google` (or `/auth/apple`, `/auth/microsoft`, `/auth/github`)
 2. Package redirects to the provider's OAuth page
 3. Provider redirects (or POSTs) back to the callback URL
 4. Package exchanges the code, fetches the user profile, and calls `authAdapter.findOrCreateByProvider`
@@ -107,7 +115,7 @@ When configured, the `postRedirect` value is validated against the allowlist at 
 
 The default `mongoAuthAdapter` stores social users in `AuthUser` with a `providerIds` field (e.g. `["google:1234567890"]`). If no existing provider key is found, a new account is created — emails are never auto-linked. To connect a social identity to an existing credential account the user must explicitly use the link flow below.
 
-**Email conflict handling:** If a user attempts to sign in via Google (or Apple/Microsoft) and the email returned by the provider already belongs to a credential-based account, `findOrCreateByProvider` throws `HttpError(409, ...)`. The OAuth callback catches this and redirects to `auth.oauth.postRedirect?error=<message>` so the client can display a helpful prompt (e.g. "An account with this email already exists — sign in with your password, then link Google from your account settings.").
+**Email conflict handling:** If a user attempts to sign in via Google (or Apple/Microsoft/GitHub) and the email returned by the provider already belongs to a credential-based account, `findOrCreateByProvider` throws `HttpError(409, ...)`. The OAuth callback catches this and redirects to `auth.oauth.postRedirect?error=<message>` so the client can display a helpful prompt (e.g. "An account with this email already exists — sign in with your password, then link Google from your account settings.").
 
 To support social login with a custom adapter, implement `findOrCreateByProvider`:
 
@@ -124,12 +132,13 @@ const myAdapter: AuthAdapter = {
 
 ### Linking a provider to an existing account
 
-A logged-in user can link their account to a Google, Apple, or Microsoft identity by navigating to the link route. This is the only way to associate a social login with an existing credential account — email matching is intentionally not done automatically.
+A logged-in user can link their account to a Google, Apple, Microsoft, or GitHub identity by navigating to the link route. This is the only way to associate a social login with an existing credential account — email matching is intentionally not done automatically.
 
 ```
 GET /auth/google/link      (requires active session via cookie)
 GET /auth/apple/link       (requires active session via cookie)
 GET /auth/microsoft/link   (requires active session via cookie)
+GET /auth/github/link      (requires active session via cookie)
 ```
 
 The link flow:
@@ -155,11 +164,12 @@ const myAdapter: AuthAdapter = {
 
 ### Unlinking a provider
 
-A logged-in user can remove a linked Google or Microsoft identity via:
+A logged-in user can remove a linked Google, Microsoft, or GitHub identity via:
 
 ```
 DELETE /auth/google/link      (requires active session via cookie)
 DELETE /auth/microsoft/link   (requires active session via cookie)
+DELETE /auth/github/link      (requires active session via cookie)
 ```
 
 Returns `204 No Content` on success. All `google:*` entries are removed from the user's `providerIds`.

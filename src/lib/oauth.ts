@@ -1,4 +1,4 @@
-import { Google, Apple, MicrosoftEntraId, generateState, generateCodeVerifier } from "arctic";
+import { Google, Apple, MicrosoftEntraId, GitHub, generateState, generateCodeVerifier } from "arctic";
 import { getRedis } from "./redis";
 import { appConnection, mongoose } from "./mongo";
 import { getAppName } from "./appConfig";
@@ -9,9 +9,10 @@ export type OAuthProviderConfig = {
   google?: { clientId: string; clientSecret: string; redirectUri: string };
   apple?: { clientId: string; teamId: string; keyId: string; privateKey: string; redirectUri: string };
   microsoft?: { tenantId: string; clientId: string; clientSecret: string; redirectUri: string };
+  github?: { clientId: string; clientSecret: string; redirectUri: string };
 };
 
-type Providers = { google?: Google; apple?: Apple; microsoft?: MicrosoftEntraId };
+type Providers = { google?: Google; apple?: Apple; microsoft?: MicrosoftEntraId; github?: GitHub };
 
 let _providers: Providers = {};
 
@@ -28,6 +29,10 @@ export const initOAuthProviders = (config: OAuthProviderConfig) => {
     const { tenantId, clientId, clientSecret, redirectUri } = config.microsoft;
     _providers.microsoft = new MicrosoftEntraId(tenantId, clientId, clientSecret, redirectUri);
   }
+  if (config.github) {
+    const { clientId, clientSecret, redirectUri } = config.github;
+    _providers.github = new GitHub(clientId, clientSecret, redirectUri);
+  }
 };
 
 export const getGoogle = (): Google => {
@@ -43,6 +48,11 @@ export const getApple = (): Apple => {
 export const getMicrosoft = (): MicrosoftEntraId => {
   if (!_providers.microsoft) throw new Error("Microsoft Entra ID OAuth not configured");
   return _providers.microsoft;
+};
+
+export const getGitHub = (): GitHub => {
+  if (!_providers.github) throw new Error("GitHub OAuth not configured");
+  return _providers.github;
 };
 
 export const getConfiguredOAuthProviders = (): string[] =>

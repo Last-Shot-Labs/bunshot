@@ -6,7 +6,7 @@ import { z } from "zod";
 import type { Context } from "hono";
 import type { AppEnv } from "@lib/context";
 import {
-  getGoogle, getApple, getMicrosoft,
+  getGoogle, getApple, getMicrosoft, getGitHub,
   storeOAuthState, consumeOAuthState,
   generateState, generateCodeVerifier,
 } from "@lib/oauth";
@@ -411,6 +411,125 @@ export const createOAuthRouter = (providers: string[], postLoginRedirect: string
           return c.json({ error: "Auth adapter does not support unlinkProvider" }, 500);
         }
         await adapter.unlinkProvider(c.get("authUserId")!, "microsoft");
+        return c.body(null, 204);
+      }
+    );
+  }
+
+  // ─── GitHub ────────────────────────────────────────────────────────────
+  if (providers.includes("github")) {
+    router.openapi(
+      createRoute({
+        method: "get",
+        path: "/auth/github",
+        summary: "Initiate GitHub OAuth",
+        description: "Redirects the user to GitHub's authorization page to begin the OAuth login flow. After the user authorizes, GitHub redirects back to `/auth/github/callback`.",
+        tags,
+        responses: {
+          302: { description: "Redirect to GitHub's OAuth authorization page." },
+          500: { content: { "application/json": { schema: OAuthErrorResponse } }, description: "OAuth provider not configured." },
+        },
+      }),
+      async (c) => {
+        const state = generateState();
+        await storeOAuthState(state);
+        const url = getGitHub().createAuthorizationURL(state, ["read:user", "user:email"]);
+        return c.redirect(url.toString());
+      }
+    );
+
+    router.openapi(
+      createRoute({
+        method: "get",
+        path: "/auth/github/callback",
+        summary: "GitHub OAuth callback",
+        description: "Handles the redirect from GitHub after user authorization. Validates the OAuth state and code, then creates or finds the user account. Sets a session cookie and redirects to the configured post-login URL.",
+        tags,
+        request: {
+          query: z.object({
+            code: z.string().describe("Authorization code from GitHub."),
+            state: z.string().describe("OAuth state parameter for CSRF protection."),
+          }),
+        },
+        responses: {
+          302: { description: "Redirect to the post-login URL with session token." },
+          400: { content: { "application/json": { schema: OAuthErrorResponse } }, description: "Invalid callback parameters or expired state." },
+        },
+      }),
+      async (c) => {
+        const { code, state } = c.req.valid("query");
+        if (!code || !state) return c.json({ error: "Invalid callback" }, 400);
+
+        const stored = await consumeOAuthState(state);
+        if (!stored) return c.json({ error: "Invalid or expired state" }, 400);
+
+        const tokens = await getGitHub().validateAuthorizationCode(code);
+        const headers = { Authorization: `Bearer ${tokens.accessToken()}`, "User-Agent": "bunshot" };
+
+        const info = await fetch("https://api.github.com/user", { headers })
+          .then((r) => r.json()) as { id: number; login: string; name?: string; avatar_url?: string; email?: string };
+
+        // GitHub may not return email on /user if it's private — fetch from /user/emails
+        let email = info.email;
+        if (!email) {
+          const emails = await fetch("https://api.github.com/user/emails", { headers })
+            .then((r) => r.json()) as { email: string; primary: boolean; verified: boolean }[];
+          email = emails.find((e) => e.primary && e.verified)?.email ?? emails.find((e) => e.verified)?.email;
+        }
+
+        if (stored.linkUserId) {
+          const adapter = getAuthAdapter();
+          if (!adapter.linkProvider) return c.json({ error: "Auth adapter does not support linkProvider" }, 500);
+          await adapter.linkProvider(stored.linkUserId, "github", String(info.id));
+          const sep = postLoginRedirect.includes("?") ? "&" : "?";
+          return c.redirect(`${postLoginRedirect}${sep}linked=github`);
+        }
+
+        return finishOAuth(c, "github", String(info.id), { email, name: info.name, avatarUrl: info.avatar_url }, postLoginRedirect);
+      }
+    );
+
+    router.use("/auth/github/link", userAuth);
+
+    router.openapi(
+      withSecurity(createRoute({
+        method: "get",
+        path: "/auth/github/link",
+        summary: "Link GitHub account",
+        description: "Initiates an OAuth flow to link a GitHub account to the authenticated user. Requires a valid session. Redirects to GitHub's authorization page.",
+        tags,
+        responses: {
+          302: { description: "Redirect to GitHub's OAuth authorization page." },
+          401: { content: { "application/json": { schema: OAuthErrorResponse } }, description: "No valid session." },
+        },
+      }), { cookieAuth: [] }, { userToken: [] }),
+      async (c) => {
+        const state = generateState();
+        await storeOAuthState(state, undefined, c.get("authUserId")!);
+        const url = getGitHub().createAuthorizationURL(state, ["read:user", "user:email"]);
+        return c.redirect(url.toString());
+      }
+    );
+
+    router.openapi(
+      withSecurity(createRoute({
+        method: "delete",
+        path: "/auth/github/link",
+        summary: "Unlink GitHub account",
+        description: "Removes the linked GitHub OAuth account from the authenticated user. Requires a valid session.",
+        tags,
+        responses: {
+          204: { description: "GitHub account unlinked successfully." },
+          401: { content: { "application/json": { schema: OAuthErrorResponse } }, description: "No valid session." },
+          500: { content: { "application/json": { schema: OAuthErrorResponse } }, description: "Auth adapter does not support unlinkProvider." },
+        },
+      }), { cookieAuth: [] }, { userToken: [] }),
+      async (c) => {
+        const adapter = getAuthAdapter();
+        if (!adapter.unlinkProvider) {
+          return c.json({ error: "Auth adapter does not support unlinkProvider" }, 500);
+        }
+        await adapter.unlinkProvider(c.get("authUserId")!, "github");
         return c.body(null, 204);
       }
     );
