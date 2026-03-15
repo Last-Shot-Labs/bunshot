@@ -8,8 +8,9 @@ The `/ws` endpoint is mounted automatically by `createServer`. No extra setup ne
 |---|---|
 | Upgrade / auth | Reads `auth-token` cookie → verifies JWT → checks session → sets `ws.data.userId` |
 | `open` | Logs connection, sends `{ event: "connected", id }` |
-| `message` | Handles room actions (see below), echoes everything else |
+| `message` | Checks message size (closes with 1009 if exceeds `maxMessageSize`), handles room actions (see below), drops non-room messages unless custom handler provided |
 | `close` | Clears `ws.data.rooms`, logs disconnection |
+| `maxMessageSize` | 65 536 bytes (64 KB) — configurable via `ws.maxMessageSize` |
 
 ### Socket data (`SocketData`)
 
@@ -56,7 +57,7 @@ With no type parameter, `SocketData` defaults to `{ id, userId, rooms }` — the
 
 ### Overriding the message handler
 
-Pass `ws.handler` to `createServer` to replace the default echo. Room action handling always runs first — your handler only receives non-room messages:
+Pass `ws.handler` to `createServer` to add custom message handling. Room action handling always runs first — your handler only receives non-room messages:
 
 ```ts
 await createServer({

@@ -108,6 +108,10 @@ export interface AuthRateLimitConfig {
   resetPassword?: { windowMs?: number; max?: number };
   /** Max account deletion attempts per user per window. Default: 3 per hour. */
   deleteAccount?: { windowMs?: number; max?: number };
+  /** Max MFA verification attempts per IP per window. Default: 10 per 15 min. */
+  mfaVerify?: { windowMs?: number; max?: number };
+  /** Max MFA email OTP resend attempts per IP per window. Default: 5 per minute. */
+  mfaResend?: { windowMs?: number; max?: number };
   /**
    * Store backend for auth rate limit counters.
    * Defaults to "redis" when Redis is enabled, otherwise "memory".
@@ -246,6 +250,12 @@ export interface SecurityConfig {
    * Runs before IP rate limiting so blocked IPs are rejected immediately.
    */
   botProtection?: BotProtectionConfig;
+  /**
+   * Trusted proxy configuration for IP extraction.
+   * - `false` (default): use socket-level IP only, ignore X-Forwarded-For entirely.
+   * - A number N: trust N proxy hops — take the Nth-from-right IP in the X-Forwarded-For chain.
+   */
+  trustProxy?: false | number;
 }
 
 export interface ModelSchemasConfig {
@@ -353,6 +363,10 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
 
   const appName = appConfig.name ?? "Bun Core API";
   const openApiVersion = appConfig.version ?? "1.0.0";
+
+  // Trust-proxy for IP extraction
+  const { setTrustProxy } = await import("@lib/clientIp");
+  setTrustProxy(securityConfig.trustProxy ?? false);
 
   const corsOrigins = securityConfig.cors ?? "*";
   if (corsOrigins === "*" && process.env.NODE_ENV === "production") {
@@ -523,6 +537,20 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
 
   // Tenant resolution middleware (after identify, before user middleware + routes)
   if (config.tenancy) {
+    if (!config.tenancy.onResolve) {
+      if (process.env.NODE_ENV === "production") {
+        throw new Error(
+          "[security] Tenancy is configured without an onResolve callback. " +
+          "In production, onResolve is required to validate tenant IDs and prevent cross-tenant access. " +
+          "Provide tenancy.onResolve or remove the tenancy config."
+        );
+      } else {
+        console.warn(
+          "[security] Tenancy is configured without an onResolve callback — " +
+          "tenant IDs will be trusted without validation. This is unsafe in production."
+        );
+      }
+    }
     const { createTenantMiddleware } = await import("@middleware/tenant");
     app.use(createTenantMiddleware(config.tenancy));
   }
@@ -599,7 +627,7 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
       setMfaChallengeSqliteDb(getDb());
     }
     const { createMfaRouter } = await import(`${coreRoutesDir}/mfa`);
-    app.route("/", createMfaRouter());
+    app.route("/", createMfaRouter({ rateLimit: authRateLimit }));
   }
 
   if (config.jobs?.statusEndpoint) {

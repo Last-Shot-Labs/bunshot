@@ -15,6 +15,12 @@ export interface WsConfig<T extends object = object> {
    * ws.data.userId is available for auth checks.
    */
   onRoomSubscribe?: (ws: ServerWebSocket<SocketData<T>>, room: string) => boolean | Promise<boolean>;
+  /**
+   * Maximum allowed WebSocket message size in bytes.
+   * Messages exceeding this limit will cause the connection to be closed with code 1009.
+   * Defaults to 65536 (64 KB).
+   */
+  maxMessageSize?: number;
 }
 
 export interface CreateServerConfig<T extends object = object> extends CreateAppConfig {
@@ -33,21 +39,28 @@ export const createServer = async <T extends object = object>(
   const app = await createApp(config);
   const port = Number(process.env.PORT ?? config.port ?? 3000);
   const { workersDir, enableWorkers = true, ws: wsConfig = {} } = config;
-  const { handler: userWs, upgradeHandler: wsUpgradeHandler, onRoomSubscribe } = wsConfig;
+  const { handler: userWs, upgradeHandler: wsUpgradeHandler, onRoomSubscribe, maxMessageSize = 65_536 } = wsConfig;
 
   // Default handlers are typed for the base SocketData — cast is safe because
   // they only access id/userId/rooms which exist in every SocketData<T>.
   type SD = SocketData<T>;
   const defaultOpen = defaultWebsocket.open as WebSocketHandler<SD>["open"];
-  const defaultMessage = defaultWebsocket.message as WebSocketHandler<SD>["message"];
   const defaultClose = defaultWebsocket.close as WebSocketHandler<SD>["close"];
   const defaultDrain = defaultWebsocket.drain as WebSocketHandler<SD>["drain"];
 
   const ws: WebSocketHandler<SD> = {
     open: userWs?.open ?? defaultOpen,
     async message(socket, message) {
+      const size = typeof message === "string" ? message.length : message.byteLength;
+      if (size > maxMessageSize) {
+        socket.close(1009, "Message too large");
+        return;
+      }
       if (!await handleRoomActions(socket, message, onRoomSubscribe)) {
-        (userWs?.message ?? defaultMessage!)(socket, message);
+        if (userWs?.message) {
+          userWs.message(socket, message);
+        }
+        // No default echo — without a custom handler, non-room messages are silently dropped
       }
     },
     close(socket, code, reason) {

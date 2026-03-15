@@ -25,13 +25,17 @@ export const getRoomSubscribers = (room: string): string[] =>
 
 type RoomGuard<T extends WithRooms> = (ws: ServerWebSocket<T>, room: string) => boolean | Promise<boolean>;
 
+const MAX_ROOM_ACTION_SIZE = 4096; // 4 KB — room actions are small JSON payloads
+
 export const handleRoomActions = async <T extends WithSocketId>(
   ws: ServerWebSocket<T>,
   message: string | Buffer,
   onSubscribe?: RoomGuard<T>,
 ): Promise<boolean> => {
   try {
-    const data = JSON.parse(typeof message === "string" ? message : Buffer.from(message).toString());
+    const raw = typeof message === "string" ? message : Buffer.from(message).toString();
+    if (raw.length > MAX_ROOM_ACTION_SIZE) return false; // not a room action
+    const data = JSON.parse(raw);
     if (data.action === "subscribe" && typeof data.room === "string") {
       if (onSubscribe && !(await onSubscribe(ws, data.room))) {
         ws.send(JSON.stringify({ event: "subscribe_denied", room: data.room }));

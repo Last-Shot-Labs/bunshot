@@ -9,6 +9,9 @@ import { consumeMfaChallenge, replaceMfaChallengeOtp } from "@lib/mfaChallenge";
 import { COOKIE_TOKEN, COOKIE_REFRESH_TOKEN } from "@lib/constants";
 import { getRefreshTokenConfig, getAccessTokenExpiry, getRefreshTokenExpiry, getMfaEmailOtpConfig, getMfaWebAuthnConfig } from "@lib/appConfig";
 import { getAuthAdapter } from "@lib/authAdapter";
+import { trackAttempt } from "@lib/authRateLimit";
+import { getClientIp } from "@lib/clientIp";
+import type { AuthRateLimitConfig } from "../app";
 
 const isProd = process.env.NODE_ENV === "production";
 const cookieOptions = (maxAge?: number) => ({
@@ -22,8 +25,16 @@ const cookieOptions = (maxAge?: number) => ({
 const tags = ["MFA"];
 const ErrorResponse = z.object({ error: z.string() }).openapi("MfaErrorResponse");
 
-export const createMfaRouter = () => {
+export interface MfaRouterOptions {
+  rateLimit?: AuthRateLimitConfig;
+}
+
+export const createMfaRouter = ({ rateLimit }: MfaRouterOptions = {}) => {
   const router = createRouter();
+
+  // Resolve MFA rate limits with defaults
+  const mfaVerifyOpts = { windowMs: rateLimit?.mfaVerify?.windowMs ?? 15 * 60 * 1000, max: rateLimit?.mfaVerify?.max ?? 10 };
+  const mfaResendOpts = { windowMs: rateLimit?.mfaResend?.windowMs ?? 60 * 1000, max: rateLimit?.mfaResend?.max ?? 5 };
 
   // All MFA setup/management routes require auth
   router.use("/auth/mfa/setup", userAuth);
@@ -144,9 +155,15 @@ export const createMfaRouter = () => {
       responses: {
         200: { content: { "application/json": { schema: MfaLoginResponse } }, description: "MFA verified. Session created." },
         401: { content: { "application/json": { schema: ErrorResponse } }, description: "Invalid or expired MFA token, or invalid code." },
+        429: { content: { "application/json": { schema: ErrorResponse } }, description: "Too many MFA verification attempts. Try again later." },
       },
     }),
     async (c) => {
+      const ip = getClientIp(c);
+      if (await trackAttempt(`mfa-verify:${ip}`, mfaVerifyOpts)) {
+        return c.json({ error: "Too many MFA verification attempts. Try again later." }, 429);
+      }
+
       const { mfaToken, code, method, webauthnResponse } = c.req.valid("json");
 
       if (!code && !webauthnResponse) {
@@ -191,7 +208,7 @@ export const createMfaRouter = () => {
 
       // Create session — reuse the service helper for refresh token support
       const result = await AuthService.createSessionForUser(userId, {
-        ipAddress: (c.req.header("x-forwarded-for")?.split(",")[0]?.trim()) ?? c.req.header("x-real-ip") ?? undefined,
+        ipAddress: getClientIp(c),
         userAgent: c.req.header("user-agent") ?? undefined,
       });
 
@@ -424,6 +441,11 @@ export const createMfaRouter = () => {
       },
     }),
     async (c) => {
+      const ip = getClientIp(c);
+      if (await trackAttempt(`mfa-resend:${ip}`, mfaResendOpts)) {
+        return c.json({ error: "Too many resend attempts. Try again later." }, 429);
+      }
+
       const { mfaToken } = c.req.valid("json");
       const emailOtpConfig = getMfaEmailOtpConfig();
       if (!emailOtpConfig) return c.json({ error: "Email OTP is not configured" }, 400);

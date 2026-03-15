@@ -24,6 +24,7 @@ export { signToken, verifyToken } from "@lib/jwt";
 export { log } from "@lib/logger";
 export { createResetToken, consumeResetToken, setPasswordResetStore } from "@lib/resetPassword";
 export { timingSafeEqual, sha256 } from "@lib/crypto";
+export { getClientIp, setTrustProxy } from "@lib/clientIp";
 export { storeOAuthCode, consumeOAuthCode, setOAuthCodeStore } from "@lib/oauthCode";
 export type { OAuthCodePayload } from "@lib/oauthCode";
 export { createSession, getSession, deleteSession, getUserSessions, getActiveSessionCount, evictOldestSession, updateSessionLastActive, setSessionStore, deleteUserSessions, setRefreshToken, getSessionByRefreshToken, rotateRefreshToken } from "@lib/session";

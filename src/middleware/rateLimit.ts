@@ -1,6 +1,7 @@
 import type { MiddlewareHandler } from "hono";
 import { trackAttempt } from "@lib/authRateLimit";
 import { buildFingerprint } from "@lib/fingerprint";
+import { getClientIp } from "@lib/clientIp";
 import type { AppEnv } from "@lib/context";
 
 export interface RateLimitOptions {
@@ -18,9 +19,7 @@ export const rateLimit = ({
   const opts = { windowMs, max };
 
   return async (c, next) => {
-    // Take the leftmost (client) IP from x-forwarded-for
-    const raw = c.req.header("x-forwarded-for") ?? "";
-    const ip = raw.split(",")[0]?.trim() || "unknown";
+    const ip = getClientIp(c);
 
     // Per-tenant namespacing: each tenant gets independent rate limit buckets
     const tenantId = c.get("tenantId");

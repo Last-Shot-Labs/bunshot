@@ -43,6 +43,8 @@ await createServer({
       resendVerification: { windowMs: 60 * 60 * 1000, max: 3  }, // default: 3 attempts / hour (per user)
       forgotPassword:     { windowMs: 15 * 60 * 1000, max: 5  }, // default: 5 attempts / 15 min (per IP)
       resetPassword:      { windowMs: 15 * 60 * 1000, max: 10 }, // default: 10 attempts / 15 min (per IP)
+      mfaVerify:          { windowMs: 15 * 60 * 1000, max: 10 }, // default: 10 attempts / 15 min (per IP)
+      mfaResend:          { windowMs: 60 * 1000,      max: 5  }, // default: 5 attempts / minute (per IP)
       store: "redis",                       // default: "redis" when Redis is enabled, else "memory"
     },
     sessionPolicy: {                        // optional — session concurrency and metadata
@@ -115,6 +117,7 @@ await createServer({
       contentSecurityPolicy: "default-src 'self'",  // CSP header value
       permissionsPolicy: "camera=(), microphone=()", // Permissions-Policy header value
     },
+    trustProxy: 1,                          // default: false — see "Trusted Proxy" section below
   },
 
   // Extra middleware injected after identify, before route matching
@@ -141,6 +144,7 @@ await createServer({
     handler: { ... },                                  // override open/message/close/drain handlers
     upgradeHandler: async (req, server) => { ... },    // replace default cookie-JWT upgrade logic
     onRoomSubscribe(ws, room) { return true; },        // gate room subscriptions; can be async
+    maxMessageSize: 65_536,                            // default: 65536 (64 KB) — close connection on oversized messages
   },
 });
 ```

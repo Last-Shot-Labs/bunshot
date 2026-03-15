@@ -56,6 +56,10 @@ import {
   timingSafeEqual,                                  // constant-time string comparison for secrets/hashes
   sha256,                                           // SHA-256 hash helper
 
+  // IP / proxy utilities
+  getClientIp,                                      // centralized IP extraction — respects security.trustProxy setting
+  setTrustProxy,                                    // configure trust level (called automatically by createApp)
+
   // Utilities
   HttpError, log, validate, createRouter, createRoute,
   registerSchema, registerSchemas,                // named OpenAPI schema registration

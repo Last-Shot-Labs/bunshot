@@ -721,8 +721,9 @@ The `/ws` endpoint is mounted automatically by `createServer`. No extra setup ne
 |---|---|
 | Upgrade / auth | Reads `auth-token` cookie → verifies JWT → checks session → sets `ws.data.userId` |
 | `open` | Logs connection, sends `{ event: "connected", id }` |
-| `message` | Handles room actions (see below), echoes everything else |
+| `message` | Checks message size (closes with 1009 if exceeds `maxMessageSize`), handles room actions (see below), drops non-room messages unless custom handler provided |
 | `close` | Clears `ws.data.rooms`, logs disconnection |
+| `maxMessageSize` | 65 536 bytes (64 KB) — configurable via `ws.maxMessageSize` |
 
 ### Socket data (`SocketData`)
 
@@ -769,7 +770,7 @@ With no type parameter, `SocketData` defaults to `{ id, userId, rooms }` — the
 
 ### Overriding the message handler
 
-Pass `ws.handler` to `createServer` to replace the default echo. Room action handling always runs first — your handler only receives non-room messages:
+Pass `ws.handler` to `createServer` to add custom message handling. Room action handling always runs first — your handler only receives non-room messages:
 
 ```ts
 await createServer({
@@ -1054,6 +1055,8 @@ router.put("/products/:id", userAuth, async (c) => {
 
 Only 2xx responses are cached. Non-2xx responses pass through uncached. Omit `ttl` to cache indefinitely — the entry will persist until explicitly busted with `bustCache`.
 
+**Header sanitization:** Security-sensitive response headers (`set-cookie`, `www-authenticate`, `authorization`, `x-csrf-token`, `proxy-authenticate`) are automatically stripped before caching to prevent session fixation or auth bypass via cached responses.
+
 ### Busting by pattern
 
 When cache keys include variable parts (e.g. query params), use `bustCachePattern` to invalidate an entire logical group at once. It runs against all four stores — Redis (via SCAN), Mongo (via regex), SQLite (via LIKE), and Memory (via regex) — in parallel:
@@ -1177,6 +1180,8 @@ await createServer({
       resendVerification: { windowMs: 60 * 60 * 1000, max: 3  }, // default: 3 attempts / hour (per user)
       forgotPassword:     { windowMs: 15 * 60 * 1000, max: 5  }, // default: 5 attempts / 15 min (per IP)
       resetPassword:      { windowMs: 15 * 60 * 1000, max: 10 }, // default: 10 attempts / 15 min (per IP)
+      mfaVerify:          { windowMs: 15 * 60 * 1000, max: 10 }, // default: 10 attempts / 15 min (per IP)
+      mfaResend:          { windowMs: 60 * 1000,      max: 5  }, // default: 5 attempts / minute (per IP)
       store: "redis",                       // default: "redis" when Redis is enabled, else "memory"
     },
     sessionPolicy: {                        // optional — session concurrency and metadata
@@ -1249,6 +1254,7 @@ await createServer({
       contentSecurityPolicy: "default-src 'self'",  // CSP header value
       permissionsPolicy: "camera=(), microphone=()", // Permissions-Policy header value
     },
+    trustProxy: 1,                          // default: false — see "Trusted Proxy" section below
   },
 
   // Extra middleware injected after identify, before route matching
@@ -1275,6 +1281,7 @@ await createServer({
     handler: { ... },                                  // override open/message/close/drain handlers
     upgradeHandler: async (req, server) => { ... },    // replace default cookie-JWT upgrade logic
     onRoomSubscribe(ws, room) { return true; },        // gate room subscriptions; can be async
+    maxMessageSize: 65_536,                            // default: 65536 (64 KB) — close connection on oversized messages
   },
 });
 ```
@@ -1745,6 +1752,8 @@ All built-in auth endpoints are rate-limited out of the box with sensible defaul
 | `POST /auth/forgot-password` | IP address | Every attempt | 5 / 15 min |
 | `POST /auth/reset-password` | IP address | Every attempt | 10 / 15 min |
 | `POST /auth/refresh` | IP address | Every attempt | 30 / min |
+| `POST /auth/mfa/verify` | IP address | Every attempt | 10 / 15 min |
+| `POST /auth/mfa/resend` | IP address | Every attempt | 5 / min |
 
 Login is keyed by the **identifier being targeted** — an attacker rotating IPs to brute-force `alice@example.com` is blocked regardless of source IP. A successful login resets the counter so legitimate users aren't locked out.
 
@@ -1786,14 +1795,14 @@ Key formats: `login:{identifier}`, `register:{ip}`, `verify:{ip}`, `resend:{user
 `trackAttempt` and `isLimited` are exported so you can apply the same Redis-backed rate limiting to any route in your app. They use the same store configured via `auth.rateLimit.store`.
 
 ```ts
-import { trackAttempt, isLimited, bustAuthLimit } from "@lastshotlabs/bunshot";
+import { trackAttempt, isLimited, bustAuthLimit, getClientIp } from "@lastshotlabs/bunshot";
 
 // trackAttempt — increments the counter and returns true if now over the limit
 // isLimited    — checks without incrementing (read-only)
 // bustAuthLimit — resets a key (e.g. on success or admin unlock)
 
 router.post("/api/submit", async (c) => {
-  const ip = c.req.header("x-forwarded-for") ?? "unknown";
+  const ip = getClientIp(c);
   const key = `submit:${ip}`;
 
   if (await trackAttempt(key, { windowMs: 60 * 1000, max: 5 })) {
@@ -1872,6 +1881,49 @@ Both options can be combined. The middleware order is: blocklist → IP rate lim
 import { botProtection } from "@lastshotlabs/bunshot";
 
 router.use("/api/submit", botProtection({ blockList: ["198.51.100.0/24"] }));
+```
+
+---
+
+### Trusted Proxy
+
+By default, Bunshot uses the socket-level IP address for all rate limiting and session metadata — the `X-Forwarded-For` header is **ignored entirely**. This prevents attackers from spoofing IPs to bypass rate limits.
+
+If your app runs behind a reverse proxy (nginx, Cloudflare, AWS ALB), configure `security.trustProxy` so the framework reads the real client IP from the `X-Forwarded-For` chain:
+
+```ts
+await createServer({
+  security: {
+    trustProxy: 1,   // trust 1 proxy hop — use the second-to-last IP in X-Forwarded-For
+    // trustProxy: 2, // behind 2 proxies (e.g. Cloudflare → ALB → app)
+    // trustProxy: false, // default — use socket IP, ignore XFF entirely
+  },
+});
+```
+
+The number represents how many trusted proxy hops sit between your app and the internet. With `trustProxy: N`, the framework takes the Nth-from-right entry in the `X-Forwarded-For` chain, skipping the N trusted proxies.
+
+All rate limiting (auth, general, bot protection) and session metadata (IP in `GET /auth/sessions`) use the centralized `getClientIp(c)` utility, which respects this setting. It's also exported for use in your own routes:
+
+```ts
+import { getClientIp } from "@lastshotlabs/bunshot";
+
+router.post("/api/action", async (c) => {
+  const ip = getClientIp(c); // respects trustProxy setting
+  // ...
+});
+```
+
+### JWT Secret Validation
+
+JWT secrets are validated on first use. The framework throws a clear error if:
+- The environment variable (`JWT_SECRET_DEV` or `JWT_SECRET_PROD`) is missing
+- The secret is shorter than 32 characters
+
+Generate a strong secret:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
 ```
 
 ---
@@ -2076,6 +2128,10 @@ await createServer({
 ### Default exempt paths
 
 These paths skip tenant resolution by default: `/health`, `/docs`, `/openapi.json`, `/auth/` (auth is global — all tenants share a user pool). Add more via `exemptPaths`.
+
+### `onResolve` is required in production
+
+When `tenancy` is configured without an `onResolve` callback, tenant IDs from headers/subdomains/paths are trusted without validation — a cross-tenant access risk. **In production (`NODE_ENV=production`), the server will refuse to start** if `onResolve` is missing. In development, a warning is logged instead.
 
 ### Accessing tenant in routes
 
@@ -2629,6 +2685,10 @@ import {
   // Crypto utilities
   timingSafeEqual,                                  // constant-time string comparison for secrets/hashes
   sha256,                                           // SHA-256 hash helper
+
+  // IP / proxy utilities
+  getClientIp,                                      // centralized IP extraction — respects security.trustProxy setting
+  setTrustProxy,                                    // configure trust level (called automatically by createApp)
 
   // Utilities
   HttpError, log, validate, createRouter, createRoute,

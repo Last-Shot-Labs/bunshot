@@ -146,6 +146,15 @@ export const bustCachePattern = async (pattern: string) => {
   await Promise.all([storeDelPattern("redis", fullPattern), storeDelPattern("mongo", fullPattern), storeDelPattern("sqlite", fullPattern), storeDelPattern("memory", fullPattern)]);
 };
 
+/** Headers that must never be cached — storing these can cause session fixation or auth bypass. */
+const UNCACHEABLE_HEADERS = new Set([
+  "set-cookie",
+  "www-authenticate",
+  "authorization",
+  "x-csrf-token",
+  "proxy-authenticate",
+]);
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type KeyFn = (c: Parameters<MiddlewareHandler<any>>[0]) => string;
 
@@ -179,7 +188,11 @@ export const cacheResponse = ({ ttl, key, store = _defaultCacheStore }: CacheOpt
     if (res.status >= 200 && res.status < 300) {
       const body = await res.text();
       const headers: Record<string, string> = {};
-      res.headers.forEach((value, name) => { headers[name] = value; });
+      res.headers.forEach((value, name) => {
+        if (!UNCACHEABLE_HEADERS.has(name.toLowerCase())) {
+          headers[name] = value;
+        }
+      });
 
       await storeSet(store, cacheKey, JSON.stringify({ status: res.status, headers, body }), ttl);
 

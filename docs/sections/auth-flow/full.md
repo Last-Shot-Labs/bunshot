@@ -380,6 +380,8 @@ All built-in auth endpoints are rate-limited out of the box with sensible defaul
 | `POST /auth/forgot-password` | IP address | Every attempt | 5 / 15 min |
 | `POST /auth/reset-password` | IP address | Every attempt | 10 / 15 min |
 | `POST /auth/refresh` | IP address | Every attempt | 30 / min |
+| `POST /auth/mfa/verify` | IP address | Every attempt | 10 / 15 min |
+| `POST /auth/mfa/resend` | IP address | Every attempt | 5 / min |
 
 Login is keyed by the **identifier being targeted** — an attacker rotating IPs to brute-force `alice@example.com` is blocked regardless of source IP. A successful login resets the counter so legitimate users aren't locked out.
 
@@ -421,14 +423,14 @@ Key formats: `login:{identifier}`, `register:{ip}`, `verify:{ip}`, `resend:{user
 `trackAttempt` and `isLimited` are exported so you can apply the same Redis-backed rate limiting to any route in your app. They use the same store configured via `auth.rateLimit.store`.
 
 ```ts
-import { trackAttempt, isLimited, bustAuthLimit } from "@lastshotlabs/bunshot";
+import { trackAttempt, isLimited, bustAuthLimit, getClientIp } from "@lastshotlabs/bunshot";
 
 // trackAttempt — increments the counter and returns true if now over the limit
 // isLimited    — checks without incrementing (read-only)
 // bustAuthLimit — resets a key (e.g. on success or admin unlock)
 
 router.post("/api/submit", async (c) => {
-  const ip = c.req.header("x-forwarded-for") ?? "unknown";
+  const ip = getClientIp(c);
   const key = `submit:${ip}`;
 
   if (await trackAttempt(key, { windowMs: 60 * 1000, max: 5 })) {
@@ -507,6 +509,49 @@ Both options can be combined. The middleware order is: blocklist → IP rate lim
 import { botProtection } from "@lastshotlabs/bunshot";
 
 router.use("/api/submit", botProtection({ blockList: ["198.51.100.0/24"] }));
+```
+
+---
+
+### Trusted Proxy
+
+By default, Bunshot uses the socket-level IP address for all rate limiting and session metadata — the `X-Forwarded-For` header is **ignored entirely**. This prevents attackers from spoofing IPs to bypass rate limits.
+
+If your app runs behind a reverse proxy (nginx, Cloudflare, AWS ALB), configure `security.trustProxy` so the framework reads the real client IP from the `X-Forwarded-For` chain:
+
+```ts
+await createServer({
+  security: {
+    trustProxy: 1,   // trust 1 proxy hop — use the second-to-last IP in X-Forwarded-For
+    // trustProxy: 2, // behind 2 proxies (e.g. Cloudflare → ALB → app)
+    // trustProxy: false, // default — use socket IP, ignore XFF entirely
+  },
+});
+```
+
+The number represents how many trusted proxy hops sit between your app and the internet. With `trustProxy: N`, the framework takes the Nth-from-right entry in the `X-Forwarded-For` chain, skipping the N trusted proxies.
+
+All rate limiting (auth, general, bot protection) and session metadata (IP in `GET /auth/sessions`) use the centralized `getClientIp(c)` utility, which respects this setting. It's also exported for use in your own routes:
+
+```ts
+import { getClientIp } from "@lastshotlabs/bunshot";
+
+router.post("/api/action", async (c) => {
+  const ip = getClientIp(c); // respects trustProxy setting
+  // ...
+});
+```
+
+### JWT Secret Validation
+
+JWT secrets are validated on first use. The framework throws a clear error if:
+- The environment variable (`JWT_SECRET_DEV` or `JWT_SECRET_PROD`) is missing
+- The secret is shorter than 32 characters
+
+Generate a strong secret:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
 ```
 
 ---

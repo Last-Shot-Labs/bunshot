@@ -14,6 +14,7 @@ import type { PrimaryField, EmailVerificationConfig, PasswordResetConfig, Refres
 import { getRefreshTokenExpiry, getAccessTokenExpiry } from "@lib/appConfig";
 import type { AuthRateLimitConfig, AccountDeletionConfig } from "../app";
 import { getUserSessions, deleteSession, deleteUserSessions } from "@lib/session";
+import { getClientIp } from "@lib/clientIp";
 
 const isProd = process.env.NODE_ENV === "production";
 const TokenResponse = z.object({
@@ -37,9 +38,6 @@ const cookieOptions = (maxAge?: number) => ({
   path: "/",
   maxAge: maxAge ?? 60 * 60 * 24 * 7, // 7 days
 });
-
-const clientIp = (xff: string | undefined | null, xri: string | undefined | null): string | undefined =>
-  (xff ? xff.split(",")[0]?.trim() : undefined) ?? xri ?? undefined;
 
 export interface AuthRouterOptions {
   primaryField: PrimaryField;
@@ -81,7 +79,7 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
       },
     }),
     async (c) => {
-      const ip = clientIp(c.req.header("x-forwarded-for"), c.req.header("x-real-ip")) ?? "unknown";
+      const ip = getClientIp(c);
       if (await trackAttempt(`register:${ip}`, registerOpts)) {
         return c.json({ error: "Too many registration attempts. Try again later." }, 429);
       }
@@ -123,7 +121,7 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
         return c.json({ error: "Too many failed login attempts. Try again later." }, 429);
       }
       const metadata = {
-        ipAddress: clientIp(c.req.header("x-forwarded-for"), c.req.header("x-real-ip")),
+        ipAddress: getClientIp(c),
         userAgent: c.req.header("user-agent") ?? undefined,
       };
       try {
@@ -325,7 +323,7 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
         },
       }),
       async (c) => {
-        const ip = c.req.header("x-forwarded-for") ?? "unknown";
+        const ip = getClientIp(c);
         if (await trackAttempt(`verify:${ip}`, verifyOpts)) {
           return c.json({ error: "Too many verification attempts. Try again later." }, 429);
         }
@@ -398,7 +396,7 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
         },
       }),
       async (c) => {
-        const ip = clientIp(c.req.header("x-forwarded-for"), c.req.header("x-real-ip")) ?? "unknown";
+        const ip = getClientIp(c);
         const { email } = c.req.valid("json");
         // Rate-limit by both IP and email to prevent distributed email-bombing
         const ipLimited    = await trackAttempt(`forgot:ip:${ip}`, forgotOpts);
@@ -453,7 +451,7 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
         },
       }),
       async (c) => {
-        const ip = clientIp(c.req.header("x-forwarded-for"), c.req.header("x-real-ip")) ?? "unknown";
+        const ip = getClientIp(c);
         if (await trackAttempt(`reset:${ip}`, resetOpts)) {
           return c.json({ error: "Too many attempts. Try again later." }, 429);
         }
@@ -512,7 +510,7 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
         },
       }),
       async (c) => {
-        const ip = clientIp(c.req.header("x-forwarded-for"), c.req.header("x-real-ip")) ?? "unknown";
+        const ip = getClientIp(c);
         if (await trackAttempt(`refresh:ip:${ip}`, { max: 30, windowMs: 60_000 })) {
           return c.json({ error: "Too many refresh attempts. Try again later." }, 429);
         }

@@ -36,8 +36,9 @@ export const websocket: WebSocketHandler<BaseSocketData> = {
     console.log(`[ws] connected: ${ws.data.id}`);
     ws.send(JSON.stringify({ event: "connected", id: ws.data.id }));
   },
-  message(ws, message) {
-    ws.send(message);
+  message(_ws, _message) {
+    // No-op: room actions are handled by server.ts via handleRoomActions.
+    // Override ws.handler.message in WsConfig for custom message handling.
   },
   close(ws) {
     console.log(`[ws] disconnected: ${ws.data.id}`);

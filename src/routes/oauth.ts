@@ -19,6 +19,7 @@ import { COOKIE_TOKEN, COOKIE_REFRESH_TOKEN } from "@lib/constants";
 import { userAuth } from "@middleware/userAuth";
 import { getDefaultRole, getMaxSessions, getRefreshTokenConfig, getAccessTokenExpiry, getRefreshTokenExpiry } from "@lib/appConfig";
 import { trackAttempt } from "@lib/authRateLimit";
+import { getClientIp } from "@lib/clientIp";
 
 const isProd = process.env.NODE_ENV === "production";
 
@@ -61,9 +62,8 @@ const finishOAuth = async (
   const rtConfig = getRefreshTokenConfig();
   const expirySeconds = rtConfig ? getAccessTokenExpiry() : undefined;
   const token = await signToken(user.id, sessionId, expirySeconds);
-  const xff = c.req.header("x-forwarded-for");
   const metadata = {
-    ipAddress: (xff ? xff.split(",")[0]?.trim() : undefined) ?? c.req.header("x-real-ip") ?? undefined,
+    ipAddress: getClientIp(c),
     userAgent: c.req.header("user-agent") ?? undefined,
   };
   while (await getActiveSessionCount(user.id) >= getMaxSessions()) {
@@ -343,8 +343,7 @@ export const createOAuthRouter = (providers: string[], postLoginRedirect: string
     }),
     async (c) => {
       // Rate limit by IP to prevent brute-forcing codes within the 60s TTL
-      const xff = c.req.header("x-forwarded-for");
-      const ip = (xff ? xff.split(",")[0]?.trim() : undefined) ?? c.req.header("x-real-ip") ?? "unknown";
+      const ip = getClientIp(c);
       const limited = await trackAttempt(`oauth-exchange:ip:${ip}`, { max: 20, windowMs: 60_000 });
       if (limited) {
         return c.json({ error: "Too many requests" }, 429);

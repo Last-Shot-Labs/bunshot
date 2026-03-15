@@ -31,6 +31,10 @@ await createServer({
 
 These paths skip tenant resolution by default: `/health`, `/docs`, `/openapi.json`, `/auth/` (auth is global — all tenants share a user pool). Add more via `exemptPaths`.
 
+### `onResolve` is required in production
+
+When `tenancy` is configured without an `onResolve` callback, tenant IDs from headers/subdomains/paths are trusted without validation — a cross-tenant access risk. **In production (`NODE_ENV=production`), the server will refuse to start** if `onResolve` is missing. In development, a warning is logged instead.
+
 ### Accessing tenant in routes
 
 ```ts

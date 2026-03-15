@@ -1,4 +1,5 @@
 import type { MiddlewareHandler } from "hono";
+import { getClientIp } from "@lib/clientIp";
 
 // ---------------------------------------------------------------------------
 // CIDR helpers (IPv4 only; IPv6 exact-match supported)
@@ -61,8 +62,7 @@ export const botProtection = ({
   if (blockList.length === 0) return (_c, next) => next();
 
   return async (c, next) => {
-    const raw = c.req.header("x-forwarded-for") ?? "";
-    const ip = raw.split(",")[0]?.trim() ?? "unknown";
+    const ip = getClientIp(c);
 
     if (ip !== "unknown" && isBlocked(ip, blockList)) {
       return c.json({ error: "Forbidden" }, 403);

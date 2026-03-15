@@ -100,6 +100,8 @@ router.put("/products/:id", userAuth, async (c) => {
 
 Only 2xx responses are cached. Non-2xx responses pass through uncached. Omit `ttl` to cache indefinitely — the entry will persist until explicitly busted with `bustCache`.
 
+**Header sanitization:** Security-sensitive response headers (`set-cookie`, `www-authenticate`, `authorization`, `x-csrf-token`, `proxy-authenticate`) are automatically stripped before caching to prevent session fixation or auth bypass via cached responses.
+
 ### Busting by pattern
 
 When cache keys include variable parts (e.g. query params), use `bustCachePattern` to invalidate an entire logical group at once. It runs against all four stores — Redis (via SCAN), Mongo (via regex), SQLite (via LIKE), and Memory (via regex) — in parallel:
