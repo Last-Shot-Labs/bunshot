@@ -1,4 +1,5 @@
-import { Schema } from "mongoose";
+import { mongoose } from "./mongo";
+import type { Schema as SchemaType } from "mongoose";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ZodSchema = any;
@@ -19,6 +20,11 @@ function unwrap(zodType: ZodSchema): { core: ZodSchema; required: boolean } {
   return { core: t, required };
 }
 
+/** Lazily access the Mongoose Schema class (avoids top-level require of mongoose) */
+function getSchema() {
+  return (mongoose as unknown as typeof import("mongoose")).Schema;
+}
+
 /** Convert a single Zod type to a Mongoose field definition */
 function toMongooseField(zodType: ZodSchema): Record<string, unknown> {
   const { core, required } = unwrap(zodType);
@@ -30,7 +36,7 @@ function toMongooseField(zodType: ZodSchema): Record<string, unknown> {
   if (defType === "date") return { type: Date, required };
   if (defType === "enum") return { type: String, enum: core.options, required };
 
-  return { type: Schema.Types.Mixed, required };
+  return { type: getSchema().Types.Mixed, required };
 }
 
 export type ZodToMongooseRefConfig = {
@@ -48,7 +54,7 @@ export type ZodToMongooseConfig = {
   /** Override Mongoose type for specific fields (e.g., { date: { type: Date, required: true } }) */
   typeOverrides?: Record<string, unknown>;
   /** Subdocument array fields: { items: mongooseSubSchema } */
-  subdocSchemas?: Record<string, Schema>;
+  subdocSchemas?: Record<string, SchemaType>;
 };
 
 /**
@@ -81,7 +87,7 @@ export function zodToMongoose(
 
     if (config.refs?.[apiField]) {
       const { dbField, ref } = config.refs[apiField];
-      fields[dbField] = { type: Schema.Types.ObjectId, ref, required: true };
+      fields[dbField] = { type: getSchema().Types.ObjectId, ref, required: true };
       continue;
     }
 

@@ -33,6 +33,9 @@ const MONGO_URI = "mongodb://localhost:27018/bunshot_test";
 let _redisConnected = false;
 let _mongoConnected = false;
 
+// Cache known collection names to avoid calling listCollections() on every beforeEach
+let _knownCollections: string[] | null = null;
+
 /** Connect to Docker Redis (port 6380). Idempotent. */
 export async function connectTestRedis(): Promise<void> {
   if (_redisConnected) return;
@@ -50,9 +53,11 @@ export async function connectTestMongo(): Promise<void> {
   if (needsAuth) await authConnection.openUri(MONGO_URI);
   if (needsApp)  await appConnection.openUri(MONGO_URI);
   _mongoConnected = true;
+  _knownCollections = null; // Reset cache on reconnect
 }
 
-/** Flush all test data. Includes safety guards to prevent wiping non-test services. */
+/** Flush all test data. Uses deleteMany to preserve indexes (avoids autoIndex race).
+ *  Includes safety guards to prevent wiping non-test services. */
 export async function flushTestServices(): Promise<void> {
   // Redis safety guard
   if (_redisConnected) {
@@ -74,9 +79,13 @@ export async function flushTestServices(): Promise<void> {
         `SAFETY: Expected MongoDB database "${EXPECTED_MONGO_DB}", got "${dbName}". Refusing to drop collections.`
       );
     }
-    const collections = await authConnection.db!.listCollections().toArray();
+    // Use deleteMany (not dropCollection) to preserve indexes — avoids autoIndex race
+    // where Mongoose recreates indexes asynchronously and create() hangs.
+    if (!_knownCollections) {
+      _knownCollections = (await authConnection.db!.listCollections().toArray()).map((c) => c.name);
+    }
     await Promise.all(
-      collections.map((c) => authConnection.db!.collection(c.name).deleteMany({}))
+      _knownCollections.map((name) => authConnection.db!.collection(name).deleteMany({}))
     );
   }
 }
