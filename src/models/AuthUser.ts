@@ -16,6 +16,8 @@ interface IAuthUser {
   mfaEnabled?: boolean;
   /** SHA-256 hashed recovery codes for MFA. */
   recoveryCodes?: string[];
+  /** MFA methods enabled for this user (e.g., ["totp"], ["emailOtp"], ["totp", "emailOtp"]). */
+  mfaMethods?: string[];
 }
 
 type AuthUserDocument = IAuthUser & Document;
@@ -43,6 +45,8 @@ function getAuthUser() {
         mfaEnabled: { type: Boolean, default: false },
         /** SHA-256 hashed recovery codes for MFA. */
         recoveryCodes: [{ type: String }],
+        /** MFA methods enabled for this user. */
+        mfaMethods: [{ type: String }],
       },
       { timestamps: true }
     );

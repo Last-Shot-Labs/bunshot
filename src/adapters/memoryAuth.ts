@@ -17,6 +17,7 @@ interface UserRecord {
   mfaSecret: string | null;
   mfaEnabled: boolean;
   recoveryCodes: string[];
+  mfaMethods: string[];
 }
 
 interface MemorySession {
@@ -75,7 +76,7 @@ export const memoryAuthAdapter: AuthAdapter = {
     const normalised = email.toLowerCase();
     if (_byEmail.has(normalised)) throw new HttpError(409, "Email already registered");
     const id = crypto.randomUUID();
-    const user: UserRecord = { id, email: normalised, passwordHash, providerIds: [], roles: [], emailVerified: false, mfaSecret: null, mfaEnabled: false, recoveryCodes: [] };
+    const user: UserRecord = { id, email: normalised, passwordHash, providerIds: [], roles: [], emailVerified: false, mfaSecret: null, mfaEnabled: false, recoveryCodes: [], mfaMethods: [] };
     _users.set(id, user);
     _byEmail.set(normalised, id);
     return { id };
@@ -103,7 +104,7 @@ export const memoryAuthAdapter: AuthAdapter = {
 
     const id = crypto.randomUUID();
     const email = profile.email ? profile.email.toLowerCase() : null;
-    const user: UserRecord = { id, email, passwordHash: null, providerIds: [key], roles: [], emailVerified: false, mfaSecret: null, mfaEnabled: false, recoveryCodes: [] };
+    const user: UserRecord = { id, email, passwordHash: null, providerIds: [key], roles: [], emailVerified: false, mfaSecret: null, mfaEnabled: false, recoveryCodes: [], mfaMethods: [] };
     _users.set(id, user);
     if (email) _byEmail.set(email, id);
     return { id, created: true };
@@ -202,6 +203,17 @@ export const memoryAuthAdapter: AuthAdapter = {
   async removeRecoveryCode(userId, code) {
     const user = _users.get(userId);
     if (user) user.recoveryCodes = user.recoveryCodes.filter((c) => c !== code);
+  },
+  async getMfaMethods(userId) {
+    const user = _users.get(userId);
+    if (!user) return [];
+    // Backward compat: if mfaEnabled but no methods recorded, assume TOTP
+    if (user.mfaMethods.length === 0 && user.mfaEnabled) return ["totp"];
+    return [...user.mfaMethods];
+  },
+  async setMfaMethods(userId, methods) {
+    const user = _users.get(userId);
+    if (user) user.mfaMethods = [...methods];
   },
   async getTenantRoles(userId, tenantId) {
     return _tenantRoles.get(`${userId}:${tenantId}`) ?? [];

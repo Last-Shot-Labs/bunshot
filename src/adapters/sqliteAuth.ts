@@ -39,6 +39,7 @@ function initSchema(db: Database): void {
   try { db.run("ALTER TABLE users ADD COLUMN mfaSecret TEXT"); } catch { /* already exists */ }
   try { db.run("ALTER TABLE users ADD COLUMN mfaEnabled INTEGER NOT NULL DEFAULT 0"); } catch { /* already exists */ }
   try { db.run("ALTER TABLE users ADD COLUMN recoveryCodes TEXT NOT NULL DEFAULT '[]'"); } catch { /* already exists */ }
+  try { db.run("ALTER TABLE users ADD COLUMN mfaMethods TEXT NOT NULL DEFAULT '[]'"); } catch { /* already exists */ }
   // Migrate legacy sessions table (userId PK) to new multi-session schema (sessionId PK)
   try { db.run("ALTER TABLE sessions RENAME TO sessions_legacy"); } catch { /* already migrated */ }
   db.run(`CREATE TABLE IF NOT EXISTS sessions (
@@ -269,6 +270,18 @@ export const sqliteAuthAdapter: AuthAdapter = {
       current.splice(idx, 1);
       await sqliteAuthAdapter.setRecoveryCodes!(userId, current);
     }
+  },
+  async getMfaMethods(userId) {
+    const row = getDb().query<{ mfaMethods: string; mfaEnabled: number }, [string]>(
+      "SELECT mfaMethods, mfaEnabled FROM users WHERE id = ?"
+    ).get(userId);
+    const methods: string[] = row?.mfaMethods ? JSON.parse(row.mfaMethods) : [];
+    // Backward compat: if mfaEnabled but no methods recorded, assume TOTP
+    if (methods.length === 0 && row?.mfaEnabled === 1) return ["totp"];
+    return methods;
+  },
+  async setMfaMethods(userId, methods) {
+    getDb().run("UPDATE users SET mfaMethods = ? WHERE id = ?", [JSON.stringify(methods), userId]);
   },
   async getTenantRoles(userId, tenantId) {
     const rows = getDb().query<{ role: string }, [string, string]>(

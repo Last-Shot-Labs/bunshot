@@ -52,6 +52,10 @@ export interface AuthAdapter {
   getRecoveryCodes?(userId: string): Promise<string[]>;
   /** Optional. Remove a single recovery code after use. */
   removeRecoveryCode?(userId: string, code: string): Promise<void>;
+  /** Optional. Get the MFA methods enabled for a user (e.g., ["totp"], ["emailOtp"], ["totp", "emailOtp"]). */
+  getMfaMethods?(userId: string): Promise<string[]>;
+  /** Optional. Set the MFA methods enabled for a user. */
+  setMfaMethods?(userId: string, methods: string[]): Promise<void>;
   /** Optional. Get roles for a user within a specific tenant. */
   getTenantRoles?(userId: string, tenantId: string): Promise<string[]>;
   /** Optional. Set roles for a user within a specific tenant (replaces existing). */

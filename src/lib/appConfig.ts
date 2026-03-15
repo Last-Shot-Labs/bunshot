@@ -99,6 +99,13 @@ export const getRotationGraceSeconds = (): number => _refreshTokenConfig?.rotati
 // MFA config
 // ---------------------------------------------------------------------------
 
+export interface MfaEmailOtpConfig {
+  /** Called with the user's email and the OTP code. Use to send the email. */
+  onSend: (email: string, code: string) => Promise<void>;
+  /** OTP code length. Default: 6. */
+  codeLength?: number;
+}
+
 export interface MfaConfig {
   /** Issuer name shown in authenticator apps. Defaults to app name. */
   issuer?: string;
@@ -112,6 +119,8 @@ export interface MfaConfig {
   recoveryCodes?: number;
   /** MFA challenge window in seconds. Default: 300 (5 min). */
   challengeTtlSeconds?: number;
+  /** Email OTP configuration. When set, enables email-based MFA as an option. */
+  emailOtp?: MfaEmailOtpConfig;
 }
 
 let _mfaConfig: MfaConfig | null = null;
@@ -125,3 +134,5 @@ export const getMfaDigits = (): number => _mfaConfig?.digits ?? 6;
 export const getMfaPeriod = (): number => _mfaConfig?.period ?? 30;
 export const getMfaRecoveryCodeCount = (): number => _mfaConfig?.recoveryCodes ?? 10;
 export const getMfaChallengeTtl = (): number => _mfaConfig?.challengeTtlSeconds ?? 300;
+export const getMfaEmailOtpConfig = (): MfaEmailOtpConfig | null => _mfaConfig?.emailOtp ?? null;
+export const getMfaEmailOtpCodeLength = (): number => _mfaConfig?.emailOtp?.codeLength ?? 6;

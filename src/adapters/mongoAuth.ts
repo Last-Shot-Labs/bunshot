@@ -120,6 +120,16 @@ export const mongoAuthAdapter: AuthAdapter = {
   async removeRecoveryCode(userId, code) {
     await AuthUser.findByIdAndUpdate(userId, { $pull: { recoveryCodes: code } });
   },
+  async getMfaMethods(userId) {
+    const user = await AuthUser.findById(userId, "mfaMethods mfaEnabled").lean();
+    const methods = (user?.mfaMethods as string[] | undefined) ?? [];
+    // Backward compat: if mfaEnabled but no methods recorded, assume TOTP
+    if (methods.length === 0 && (user?.mfaEnabled as boolean | undefined)) return ["totp"];
+    return methods;
+  },
+  async setMfaMethods(userId, methods) {
+    await AuthUser.findByIdAndUpdate(userId, { mfaMethods: methods });
+  },
   async getTenantRoles(userId, tenantId) {
     const doc = await TenantRole.findOne({ userId, tenantId }, "roles").lean();
     return (doc?.roles as string[]) ?? [];
