@@ -94,3 +94,34 @@ const DEFAULT_ROTATION_GRACE_SECONDS = 30;
 export const getAccessTokenExpiry = (): number => _refreshTokenConfig?.accessTokenExpiry ?? DEFAULT_ACCESS_TOKEN_EXPIRY;
 export const getRefreshTokenExpiry = (): number => _refreshTokenConfig?.refreshTokenExpiry ?? DEFAULT_REFRESH_TOKEN_EXPIRY;
 export const getRotationGraceSeconds = (): number => _refreshTokenConfig?.rotationGraceSeconds ?? DEFAULT_ROTATION_GRACE_SECONDS;
+
+// ---------------------------------------------------------------------------
+// MFA config
+// ---------------------------------------------------------------------------
+
+export interface MfaConfig {
+  /** Issuer name shown in authenticator apps. Defaults to app name. */
+  issuer?: string;
+  /** TOTP algorithm. Default: "SHA1" (most compatible). */
+  algorithm?: "SHA1" | "SHA256" | "SHA512";
+  /** TOTP digits. Default: 6. */
+  digits?: number;
+  /** TOTP period in seconds. Default: 30. */
+  period?: number;
+  /** Number of recovery codes to generate. Default: 10. */
+  recoveryCodes?: number;
+  /** MFA challenge window in seconds. Default: 300 (5 min). */
+  challengeTtlSeconds?: number;
+}
+
+let _mfaConfig: MfaConfig | null = null;
+
+export const setMfaConfig = (config: MfaConfig | null) => { _mfaConfig = config; };
+export const getMfaConfig = () => _mfaConfig;
+
+export const getMfaIssuer = (): string => _mfaConfig?.issuer ?? getAppName();
+export const getMfaAlgorithm = (): string => _mfaConfig?.algorithm ?? "SHA1";
+export const getMfaDigits = (): number => _mfaConfig?.digits ?? 6;
+export const getMfaPeriod = (): number => _mfaConfig?.period ?? 30;
+export const getMfaRecoveryCodeCount = (): number => _mfaConfig?.recoveryCodes ?? 10;
+export const getMfaChallengeTtl = (): number => _mfaConfig?.challengeTtlSeconds ?? 300;

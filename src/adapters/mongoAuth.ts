@@ -95,4 +95,28 @@ export const mongoAuthAdapter: AuthAdapter = {
     const user = await AuthUser.findById(userId, "password").lean();
     return !!user?.password;
   },
+  async setMfaSecret(userId, secret) {
+    await AuthUser.findByIdAndUpdate(userId, { mfaSecret: secret });
+  },
+  async getMfaSecret(userId) {
+    const user = await AuthUser.findById(userId, "mfaSecret").lean();
+    return (user?.mfaSecret as string | undefined) ?? null;
+  },
+  async isMfaEnabled(userId) {
+    const user = await AuthUser.findById(userId, "mfaEnabled").lean();
+    return (user?.mfaEnabled as boolean | undefined) ?? false;
+  },
+  async setMfaEnabled(userId, enabled) {
+    await AuthUser.findByIdAndUpdate(userId, { mfaEnabled: enabled });
+  },
+  async setRecoveryCodes(userId, codes) {
+    await AuthUser.findByIdAndUpdate(userId, { recoveryCodes: codes });
+  },
+  async getRecoveryCodes(userId) {
+    const user = await AuthUser.findById(userId, "recoveryCodes").lean();
+    return (user?.recoveryCodes as string[] | undefined) ?? [];
+  },
+  async removeRecoveryCode(userId, code) {
+    await AuthUser.findByIdAndUpdate(userId, { $pull: { recoveryCodes: code } });
+  },
 };

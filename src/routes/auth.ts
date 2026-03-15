@@ -17,12 +17,14 @@ import { getUserSessions, deleteSession, deleteUserSessions } from "@lib/session
 
 const isProd = process.env.NODE_ENV === "production";
 const TokenResponse = z.object({
-  token: z.string().describe("JWT session token. Also set as an HttpOnly session cookie."),
+  token: z.string().describe("JWT session token. Also set as an HttpOnly session cookie. Empty string when mfaRequired is true."),
   userId: z.string().describe("Unique user ID."),
   email: z.string().optional().describe("User's email address (present when primaryField is 'email')."),
   emailVerified: z.boolean().optional().describe("Whether the email address has been verified (present when emailVerification is configured)."),
   googleLinked: z.boolean().optional().describe("Whether a Google OAuth account is linked to this user."),
   refreshToken: z.string().optional().describe("Refresh token (present when refreshTokens is configured). Also set as an HttpOnly cookie."),
+  mfaRequired: z.boolean().optional().describe("When true, complete MFA via POST /auth/mfa/verify before accessing the API."),
+  mfaToken: z.string().optional().describe("MFA challenge token. Pass to POST /auth/mfa/verify with a TOTP or recovery code."),
 }).openapi("TokenResponse");
 const ErrorResponse = z.object({ error: z.string().describe("Human-readable error message.") }).openapi("ErrorResponse");
 const tags = ["Auth"];
@@ -126,9 +128,11 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
       try {
         const result = await AuthService.login(identifier, body.password, metadata);
         await bustAuthLimit(limitKey); // success — clear failure count
-        setCookie(c, COOKIE_TOKEN, result.token, cookieOptions(refreshTokens ? getAccessTokenExpiry() : undefined));
-        if (result.refreshToken) {
-          setCookie(c, COOKIE_REFRESH_TOKEN, result.refreshToken, cookieOptions(getRefreshTokenExpiry()));
+        if (!result.mfaRequired) {
+          setCookie(c, COOKIE_TOKEN, result.token, cookieOptions(refreshTokens ? getAccessTokenExpiry() : undefined));
+          if (result.refreshToken) {
+            setCookie(c, COOKIE_REFRESH_TOKEN, result.refreshToken, cookieOptions(getRefreshTokenExpiry()));
+          }
         }
         return c.json(result, 200);
       } catch (err) {

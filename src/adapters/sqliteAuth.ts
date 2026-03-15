@@ -35,6 +35,10 @@ function initSchema(db: Database): void {
   )`);
   // Add emailVerified to pre-existing databases that lack the column
   try { db.run("ALTER TABLE users ADD COLUMN emailVerified INTEGER NOT NULL DEFAULT 0"); } catch { /* already exists */ }
+  // Add MFA columns to pre-existing databases
+  try { db.run("ALTER TABLE users ADD COLUMN mfaSecret TEXT"); } catch { /* already exists */ }
+  try { db.run("ALTER TABLE users ADD COLUMN mfaEnabled INTEGER NOT NULL DEFAULT 0"); } catch { /* already exists */ }
+  try { db.run("ALTER TABLE users ADD COLUMN recoveryCodes TEXT NOT NULL DEFAULT '[]'"); } catch { /* already exists */ }
   // Migrate legacy sessions table (userId PK) to new multi-session schema (sessionId PK)
   try { db.run("ALTER TABLE sessions RENAME TO sessions_legacy"); } catch { /* already migrated */ }
   db.run(`CREATE TABLE IF NOT EXISTS sessions (
@@ -223,6 +227,41 @@ export const sqliteAuthAdapter: AuthAdapter = {
       "SELECT passwordHash FROM users WHERE id = ?"
     ).get(userId);
     return !!row?.passwordHash;
+  },
+  async setMfaSecret(userId, secret) {
+    getDb().run("UPDATE users SET mfaSecret = ? WHERE id = ?", [secret, userId]);
+  },
+  async getMfaSecret(userId) {
+    const row = getDb().query<{ mfaSecret: string | null }, [string]>(
+      "SELECT mfaSecret FROM users WHERE id = ?"
+    ).get(userId);
+    return row?.mfaSecret ?? null;
+  },
+  async isMfaEnabled(userId) {
+    const row = getDb().query<{ mfaEnabled: number }, [string]>(
+      "SELECT mfaEnabled FROM users WHERE id = ?"
+    ).get(userId);
+    return row?.mfaEnabled === 1;
+  },
+  async setMfaEnabled(userId, enabled) {
+    getDb().run("UPDATE users SET mfaEnabled = ? WHERE id = ?", [enabled ? 1 : 0, userId]);
+  },
+  async setRecoveryCodes(userId, codes) {
+    getDb().run("UPDATE users SET recoveryCodes = ? WHERE id = ?", [JSON.stringify(codes), userId]);
+  },
+  async getRecoveryCodes(userId) {
+    const row = getDb().query<{ recoveryCodes: string }, [string]>(
+      "SELECT recoveryCodes FROM users WHERE id = ?"
+    ).get(userId);
+    return row?.recoveryCodes ? JSON.parse(row.recoveryCodes) : [];
+  },
+  async removeRecoveryCode(userId, code) {
+    const current = await sqliteAuthAdapter.getRecoveryCodes!(userId);
+    const idx = current.indexOf(code);
+    if (idx !== -1) {
+      current.splice(idx, 1);
+      await sqliteAuthAdapter.setRecoveryCodes!(userId, current);
+    }
   },
 };
 

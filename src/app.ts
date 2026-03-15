@@ -10,8 +10,8 @@ import { bearerAuth } from "@middleware/bearerAuth";
 import { identify } from "@middleware/identify";
 import type { AppEnv } from "@lib/context";
 import { HEADER_USER_TOKEN, HEADER_REFRESH_TOKEN } from "@lib/constants";
-import { setAppName, setAppRoles, setDefaultRole, setPrimaryField, setEmailVerificationConfig, setPasswordResetConfig, setMaxSessions, setPersistSessionMetadata, setIncludeInactiveSessions, setTrackLastActive, setRefreshTokenConfig } from "@lib/appConfig";
-import type { PrimaryField, EmailVerificationConfig, PasswordResetConfig, RefreshTokenConfig } from "@lib/appConfig";
+import { setAppName, setAppRoles, setDefaultRole, setPrimaryField, setEmailVerificationConfig, setPasswordResetConfig, setMaxSessions, setPersistSessionMetadata, setIncludeInactiveSessions, setTrackLastActive, setRefreshTokenConfig, setMfaConfig } from "@lib/appConfig";
+import type { PrimaryField, EmailVerificationConfig, PasswordResetConfig, RefreshTokenConfig, MfaConfig } from "@lib/appConfig";
 import { setEmailVerificationStore } from "@lib/emailVerification";
 import { setPasswordResetStore } from "@lib/resetPassword";
 import { setAuthRateLimitStore } from "@lib/authRateLimit";
@@ -157,6 +157,12 @@ export interface AuthConfig {
    * When not configured, the existing 7-day JWT behavior is unchanged.
    */
   refreshTokens?: RefreshTokenConfig;
+  /**
+   * MFA/TOTP configuration. When set, enables MFA setup/verify/disable routes under /auth/mfa/*.
+   * Login returns { mfaRequired: true, mfaToken } when MFA is enabled for the user.
+   * OAuth logins skip MFA (the OAuth provider is treated as the second factor).
+   */
+  mfa?: MfaConfig;
 }
 
 export interface AccountDeletionConfig {
@@ -192,7 +198,7 @@ export interface AuthSessionPolicyConfig {
   trackLastActive?: boolean;
 }
 
-export type { PrimaryField, EmailVerificationConfig, PasswordResetConfig, RefreshTokenConfig };
+export type { PrimaryField, EmailVerificationConfig, PasswordResetConfig, RefreshTokenConfig, MfaConfig };
 
 export interface BotProtectionConfig {
   /**
@@ -381,6 +387,7 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
   setIncludeInactiveSessions(sessionPolicy.includeInactiveSessions ?? false);
   setTrackLastActive(sessionPolicy.trackLastActive ?? false);
   setRefreshTokenConfig(authConfig.refreshTokens ?? null);
+  setMfaConfig(authConfig.mfa ?? null);
 
   if (oauthProviders) initOAuthProviders(oauthProviders);
   const configuredOAuth = getConfiguredOAuthProviders();
@@ -465,6 +472,7 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
   for await (const file of coreGlob.scan({ cwd: coreRoutesDir })) {
     if (file === "auth.ts") continue; // mounted separately below via createAuthRouter
     if (file === "oauth.ts") continue; // mounted separately below
+    if (file === "mfa.ts") continue;   // mounted separately below when mfa is configured
     const mod = await import(`${coreRoutesDir}/${file}`);
     if (mod.router) app.route("/", mod.router);
   }
@@ -476,6 +484,13 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
 
   if (configuredOAuth.length > 0) {
     app.route("/", createOAuthRouter(configuredOAuth, postOAuthRedirect));
+  }
+
+  if (authConfig.mfa && enableAuthRoutes) {
+    const { setMfaChallengeStore } = await import("@lib/mfaChallenge");
+    setMfaChallengeStore(sessions);
+    const { createMfaRouter } = await import(`${coreRoutesDir}/mfa`);
+    app.route("/", createMfaRouter());
   }
 
   // Service routes — collect all, sort by optional exported `priority`, then mount

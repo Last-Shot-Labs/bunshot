@@ -10,6 +10,12 @@ interface IAuthUser {
   roles: string[];
   /** Whether the user's email address has been verified. */
   emailVerified: boolean;
+  /** TOTP secret for MFA. Null when MFA is not set up. */
+  mfaSecret?: string | null;
+  /** Whether MFA is enabled (secret stored + confirmed via TOTP code). */
+  mfaEnabled?: boolean;
+  /** SHA-256 hashed recovery codes for MFA. */
+  recoveryCodes?: string[];
 }
 
 type AuthUserDocument = IAuthUser & Document;
@@ -31,6 +37,12 @@ function getAuthUser() {
         roles: [{ type: String }],
         /** Whether the user's email address has been verified. */
         emailVerified: { type: Boolean, default: false },
+        /** TOTP secret for MFA. */
+        mfaSecret: { type: String, default: null },
+        /** Whether MFA is enabled. */
+        mfaEnabled: { type: Boolean, default: false },
+        /** SHA-256 hashed recovery codes for MFA. */
+        recoveryCodes: [{ type: String }],
       },
       { timestamps: true }
     );

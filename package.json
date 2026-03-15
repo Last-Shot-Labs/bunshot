@@ -60,7 +60,8 @@
     "zod": ">=4.0 <5",
     "mongoose": ">=9.0 <10",
     "ioredis": ">=5.0 <6",
-    "bullmq": ">=5.0 <6"
+    "bullmq": ">=5.0 <6",
+    "otpauth": ">=9.0 <10"
   },
   "peerDependenciesMeta": {
     "mongoose": {
@@ -70,6 +71,9 @@
       "optional": true
     },
     "bullmq": {
+      "optional": true
+    },
+    "otpauth": {
       "optional": true
     }
   },
@@ -81,7 +85,8 @@
     "zod": ">=4.0",
     "mongoose": "9.2.4",
     "ioredis": "5.10.0",
-    "bullmq": "^5.70.4"
+    "bullmq": "^5.70.4",
+    "otpauth": "^9.4.2"
   },
   "publishConfig": {
     "access": "public"

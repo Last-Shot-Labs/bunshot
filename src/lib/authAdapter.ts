@@ -38,6 +38,20 @@ export interface AuthAdapter {
   deleteUser?(userId: string): Promise<void>;
   /** Optional. Check whether a user has a password set (credential account vs OAuth-only). */
   hasPassword?(userId: string): Promise<boolean>;
+  /** Optional. Store the TOTP secret for MFA setup (encrypted or plaintext, adapter decides). */
+  setMfaSecret?(userId: string, secret: string | null): Promise<void>;
+  /** Optional. Retrieve the TOTP secret for MFA verification. */
+  getMfaSecret?(userId: string): Promise<string | null>;
+  /** Optional. Check whether MFA is enabled for a user. */
+  isMfaEnabled?(userId: string): Promise<boolean>;
+  /** Optional. Enable or disable MFA for a user. */
+  setMfaEnabled?(userId: string, enabled: boolean): Promise<void>;
+  /** Optional. Store hashed recovery codes for MFA. */
+  setRecoveryCodes?(userId: string, codes: string[]): Promise<void>;
+  /** Optional. Retrieve hashed recovery codes for MFA. */
+  getRecoveryCodes?(userId: string): Promise<string[]>;
+  /** Optional. Remove a single recovery code after use. */
+  removeRecoveryCode?(userId: string, code: string): Promise<void>;
 }
 
 let _adapter: AuthAdapter | null = null;

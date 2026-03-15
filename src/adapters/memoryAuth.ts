@@ -14,6 +14,9 @@ interface UserRecord {
   providerIds: string[];
   roles: string[];
   emailVerified: boolean;
+  mfaSecret: string | null;
+  mfaEnabled: boolean;
+  recoveryCodes: string[];
 }
 
 interface MemorySession {
@@ -70,7 +73,7 @@ export const memoryAuthAdapter: AuthAdapter = {
     const normalised = email.toLowerCase();
     if (_byEmail.has(normalised)) throw new HttpError(409, "Email already registered");
     const id = crypto.randomUUID();
-    const user: UserRecord = { id, email: normalised, passwordHash, providerIds: [], roles: [], emailVerified: false };
+    const user: UserRecord = { id, email: normalised, passwordHash, providerIds: [], roles: [], emailVerified: false, mfaSecret: null, mfaEnabled: false, recoveryCodes: [] };
     _users.set(id, user);
     _byEmail.set(normalised, id);
     return { id };
@@ -98,7 +101,7 @@ export const memoryAuthAdapter: AuthAdapter = {
 
     const id = crypto.randomUUID();
     const email = profile.email ? profile.email.toLowerCase() : null;
-    const user: UserRecord = { id, email, passwordHash: null, providerIds: [key], roles: [], emailVerified: false };
+    const user: UserRecord = { id, email, passwordHash: null, providerIds: [key], roles: [], emailVerified: false, mfaSecret: null, mfaEnabled: false, recoveryCodes: [] };
     _users.set(id, user);
     if (email) _byEmail.set(email, id);
     return { id, created: true };
@@ -172,6 +175,31 @@ export const memoryAuthAdapter: AuthAdapter = {
   },
   async hasPassword(userId) {
     return !!_users.get(userId)?.passwordHash;
+  },
+  async setMfaSecret(userId, secret) {
+    const user = _users.get(userId);
+    if (user) user.mfaSecret = secret;
+  },
+  async getMfaSecret(userId) {
+    return _users.get(userId)?.mfaSecret ?? null;
+  },
+  async isMfaEnabled(userId) {
+    return _users.get(userId)?.mfaEnabled ?? false;
+  },
+  async setMfaEnabled(userId, enabled) {
+    const user = _users.get(userId);
+    if (user) user.mfaEnabled = enabled;
+  },
+  async setRecoveryCodes(userId, codes) {
+    const user = _users.get(userId);
+    if (user) user.recoveryCodes = [...codes];
+  },
+  async getRecoveryCodes(userId) {
+    return _users.get(userId)?.recoveryCodes ?? [];
+  },
+  async removeRecoveryCode(userId, code) {
+    const user = _users.get(userId);
+    if (user) user.recoveryCodes = user.recoveryCodes.filter((c) => c !== code);
   },
 };
 
