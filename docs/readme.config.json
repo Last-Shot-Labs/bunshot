@@ -26,6 +26,7 @@
     { "topic": "oauth", "default": "full" },
     { "topic": "peer-dependencies", "default": "full" },
     { "topic": "environment-variables", "default": "full" },
+    { "topic": "documentation", "default": "full" },
     { "topic": "package-development", "default": "full" },
     { "topic": "exports", "default": "full" }
   ],

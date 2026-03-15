@@ -34,13 +34,15 @@
     "./queue": {
       "import": "./dist/entrypoints/queue.js",
       "types": "./dist/entrypoints/queue.d.ts"
-    }
+    },
+    "./docs/*": "./docs/sections/*"
   },
   "bin": {
     "bunshot": "./dist/cli.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "docs/sections"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json && bun build src/cli.ts --outdir dist --minify --target bun",

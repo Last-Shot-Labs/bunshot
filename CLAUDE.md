@@ -26,6 +26,7 @@ There are no build, test, or lint scripts — this is a library package publishe
 - **`docs/sections/{topic}/full.md`** — Full detailed content for each section.
 - **`docs/sections/{topic}/overview.md`** — Concise summary (exists for larger sections only).
 - Profiles (e.g., `npm`) override specific sections to use `overview` instead of `full`. Add new profiles in the config's `profiles` object.
+- **Extensible by consumers:** `docs/sections/` ships with the npm package. Consuming projects can reference bunshot sections in their own `readme.config.json` via package paths (e.g., `"file": "@lastshotlabs/bunshot/docs/auth-flow/overview.md"`). The build script resolves package paths via `import.meta.resolve`.
 
 ## Architecture
 

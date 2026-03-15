@@ -11,6 +11,19 @@ if (profile && !config.profiles?.[profile]) {
   process.exit(1);
 }
 
+/** Resolve a file path — relative paths from config dir, package paths via import.meta.resolve */
+function resolveFilePath(file: string): string {
+  if (file.startsWith("./") || file.startsWith("/") || file.startsWith("../")) {
+    return import.meta.dir + "/" + file;
+  }
+  // Package path (e.g. "@lastshotlabs/bunshot/docs/auth-flow/full.md")
+  if (file.includes("/") && !file.startsWith("sections")) {
+    const resolved = import.meta.resolve(file);
+    return resolved.replace(/^file:\/\/\//, "");
+  }
+  return import.meta.dir + "/" + file;
+}
+
 const parts: string[] = [
   "<!-- AUTO-GENERATED — edit docs/sections/, not this file. Run: bun run readme -->",
 ];
@@ -20,7 +33,7 @@ for (let i = 0; i < config.sections.length; i++) {
 
   let filePath: string;
   if (section.file) {
-    filePath = import.meta.dir + "/" + section.file;
+    filePath = resolveFilePath(section.file);
   } else {
     const variant = overrides[section.topic] ?? section.default ?? "full";
     const candidate = `${import.meta.dir}/sections/${section.topic}/${variant}.md`;
