@@ -7,7 +7,7 @@ import * as MfaService from "@services/mfa";
 import * as AuthService from "@services/auth";
 import { consumeMfaChallenge, replaceMfaChallengeOtp } from "@lib/mfaChallenge";
 import { COOKIE_TOKEN, COOKIE_REFRESH_TOKEN } from "@lib/constants";
-import { getRefreshTokenConfig, getAccessTokenExpiry, getRefreshTokenExpiry, getMfaEmailOtpConfig } from "@lib/appConfig";
+import { getRefreshTokenConfig, getAccessTokenExpiry, getRefreshTokenExpiry, getMfaEmailOtpConfig, getMfaWebAuthnConfig } from "@lib/appConfig";
 import { getAuthAdapter } from "@lib/authAdapter";
 
 const isProd = process.env.NODE_ENV === "production";
@@ -125,7 +125,7 @@ export const createMfaRouter = () => {
       method: "post",
       path: "/auth/mfa/verify",
       summary: "Complete MFA login",
-      description: "Completes login by verifying a TOTP code, email OTP code, or recovery code after password authentication. Requires the mfaToken returned from the login endpoint. Optionally specify 'method' to target a specific verification method.",
+      description: "Completes login by verifying a TOTP code, email OTP code, recovery code, or WebAuthn assertion after password authentication. Requires the mfaToken returned from the login endpoint. Optionally specify 'method' to target a specific verification method.",
       tags,
       request: {
         body: {
@@ -133,8 +133,9 @@ export const createMfaRouter = () => {
             "application/json": {
               schema: z.object({
                 mfaToken: z.string().describe("MFA challenge token from the login response."),
-                code: z.string().describe("6-digit TOTP/email OTP code or 8-character recovery code."),
-                method: z.enum(["totp", "emailOtp"]).optional().describe("Specify which MFA method to verify. If omitted, methods are tried automatically."),
+                code: z.string().optional().describe("6-digit TOTP/email OTP code or 8-character recovery code. Required unless using WebAuthn."),
+                method: z.enum(["totp", "emailOtp", "webauthn"]).optional().describe("Specify which MFA method to verify. If omitted, methods are tried automatically."),
+                webauthnResponse: z.record(z.string(), z.unknown()).optional().describe("WebAuthn authentication response from navigator.credentials.get(). Pass the entire response object."),
               }),
             },
           },
@@ -146,21 +147,30 @@ export const createMfaRouter = () => {
       },
     }),
     async (c) => {
-      const { mfaToken, code, method } = c.req.valid("json");
+      const { mfaToken, code, method, webauthnResponse } = c.req.valid("json");
+
+      if (!code && !webauthnResponse) {
+        return c.json({ error: "Either 'code' or 'webauthnResponse' is required" }, 401);
+      }
 
       const challenge = await consumeMfaChallenge(mfaToken);
       if (!challenge) return c.json({ error: "Invalid or expired MFA token" }, 401);
 
-      const { userId, emailOtpHash } = challenge;
+      const { userId, emailOtpHash, webauthnChallenge } = challenge;
       let valid = false;
 
-      if (method === "totp") {
+      if (method === "webauthn" || (!method && webauthnResponse)) {
+        // WebAuthn verification
+        if (webauthnResponse && webauthnChallenge) {
+          valid = await MfaService.verifyWebAuthn(userId, webauthnResponse, webauthnChallenge);
+        }
+      } else if (method === "totp") {
         // Only try TOTP
-        valid = await MfaService.verifyTotp(userId, code);
+        if (code) valid = await MfaService.verifyTotp(userId, code);
       } else if (method === "emailOtp") {
         // Only try email OTP
-        if (emailOtpHash) valid = MfaService.verifyEmailOtp(emailOtpHash, code);
-      } else {
+        if (code && emailOtpHash) valid = MfaService.verifyEmailOtp(emailOtpHash, code);
+      } else if (code) {
         // Auto-detect: use emailOtpHash presence to pick order
         if (emailOtpHash) {
           // Email OTP first, then TOTP, then recovery
@@ -172,8 +182,8 @@ export const createMfaRouter = () => {
         }
       }
 
-      // Always try recovery code as fallback
-      if (!valid) {
+      // Always try recovery code as fallback (code-based only)
+      if (!valid && code) {
         valid = await MfaService.verifyRecoveryCode(userId, code);
       }
 
@@ -462,6 +472,208 @@ export const createMfaRouter = () => {
       return c.json({ methods }, 200);
     }
   );
+
+  // ─── WebAuthn / Security Keys ─────────────────────────────────────────────
+
+  if (getMfaWebAuthnConfig()) {
+    // Eager dependency check — fail fast at server start
+    MfaService.assertWebAuthnDependency().catch((err) => { throw err; });
+
+    router.use("/auth/mfa/webauthn/*", userAuth);
+
+    // Register options
+    router.openapi(
+      withSecurity(createRoute({
+        method: "post",
+        path: "/auth/mfa/webauthn/register-options",
+        summary: "Generate WebAuthn registration options",
+        description: "Generates registration options for the client to pass to navigator.credentials.create(). Returns a registrationToken to confirm registration.",
+        tags,
+        responses: {
+          200: {
+            content: {
+              "application/json": {
+                schema: z.object({
+                  options: z.record(z.string(), z.unknown()).describe("PublicKeyCredentialCreationOptions — pass directly to navigator.credentials.create()."),
+                  registrationToken: z.string().describe("Token to pass back when completing registration."),
+                }),
+              },
+            },
+            description: "Registration options generated.",
+          },
+          401: { content: { "application/json": { schema: ErrorResponse } }, description: "No valid session." },
+          501: { content: { "application/json": { schema: ErrorResponse } }, description: "WebAuthn not configured or adapter does not support it." },
+        },
+      }), { cookieAuth: [] }, { userToken: [] }),
+      async (c) => {
+        const userId = c.get("authUserId")!;
+        const result = await MfaService.initiateWebAuthnRegistration(userId);
+        return c.json(result, 200);
+      }
+    );
+
+    // Complete registration
+    router.openapi(
+      withSecurity(createRoute({
+        method: "post",
+        path: "/auth/mfa/webauthn/register",
+        summary: "Complete WebAuthn registration",
+        description: "Verifies the attestation response from navigator.credentials.create() and stores the credential. Returns recovery codes.",
+        tags,
+        request: {
+          body: {
+            content: {
+              "application/json": {
+                schema: z.object({
+                  registrationToken: z.string().describe("Token from POST /auth/mfa/webauthn/register-options."),
+                  attestationResponse: z.record(z.string(), z.unknown()).describe("Full response from navigator.credentials.create()."),
+                  name: z.string().optional().describe("User-friendly name for the key (e.g. 'YubiKey 5')."),
+                }),
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            content: {
+              "application/json": {
+                schema: z.object({
+                  message: z.string(),
+                  credentialId: z.string(),
+                  recoveryCodes: z.array(z.string()).nullable().describe("Recovery codes (always returned when WebAuthn is enabled)."),
+                }),
+              },
+            },
+            description: "Security key registered.",
+          },
+          401: { content: { "application/json": { schema: ErrorResponse } }, description: "Invalid registration token or verification failed." },
+          409: { content: { "application/json": { schema: ErrorResponse } }, description: "Security key already registered to another account." },
+          501: { content: { "application/json": { schema: ErrorResponse } }, description: "WebAuthn not configured or adapter does not support it." },
+        },
+      }), { cookieAuth: [] }, { userToken: [] }),
+      async (c) => {
+        const userId = c.get("authUserId")!;
+        const { registrationToken, attestationResponse, name } = c.req.valid("json");
+        const result = await MfaService.completeWebAuthnRegistration(userId, registrationToken, attestationResponse, name);
+        return c.json({ message: "Security key registered", ...result }, 200);
+      }
+    );
+
+    // List credentials
+    router.openapi(
+      withSecurity(createRoute({
+        method: "get",
+        path: "/auth/mfa/webauthn/credentials",
+        summary: "List WebAuthn credentials",
+        description: "Returns the security keys registered for the authenticated user. Does not include private key data.",
+        tags,
+        responses: {
+          200: {
+            content: {
+              "application/json": {
+                schema: z.object({
+                  credentials: z.array(z.object({
+                    credentialId: z.string(),
+                    name: z.string().optional(),
+                    createdAt: z.number(),
+                    transports: z.array(z.string()).optional(),
+                  })),
+                }),
+              },
+            },
+            description: "List of registered security keys.",
+          },
+          401: { content: { "application/json": { schema: ErrorResponse } }, description: "No valid session." },
+        },
+      }), { cookieAuth: [] }, { userToken: [] }),
+      async (c) => {
+        const userId = c.get("authUserId")!;
+        const adapter = getAuthAdapter();
+        const creds = adapter.getWebAuthnCredentials ? await adapter.getWebAuthnCredentials(userId) : [];
+        return c.json({
+          credentials: creds.map((cr) => ({
+            credentialId: cr.credentialId,
+            name: cr.name,
+            createdAt: cr.createdAt,
+            transports: cr.transports,
+          })),
+        }, 200);
+      }
+    );
+
+    // Remove a single credential
+    router.openapi(
+      withSecurity(createRoute({
+        method: "delete",
+        path: "/auth/mfa/webauthn/credentials/{credentialId}",
+        summary: "Remove a WebAuthn credential",
+        description: "Removes a single security key. Identity verification is only required when removing the last MFA credential.",
+        tags,
+        request: {
+          params: z.object({ credentialId: z.string() }),
+          body: {
+            content: {
+              "application/json": {
+                schema: z.object({
+                  code: z.string().optional().describe("TOTP code (required when removing the last MFA credential, if TOTP is enabled)."),
+                  password: z.string().optional().describe("Password (required when removing the last MFA credential, if no TOTP)."),
+                }),
+              },
+            },
+          },
+        },
+        responses: {
+          200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Credential removed." },
+          400: { content: { "application/json": { schema: ErrorResponse } }, description: "Missing required verification." },
+          401: { content: { "application/json": { schema: ErrorResponse } }, description: "Invalid code/password or no valid session." },
+          404: { content: { "application/json": { schema: ErrorResponse } }, description: "Credential not found." },
+          501: { content: { "application/json": { schema: ErrorResponse } }, description: "Adapter does not support WebAuthn." },
+        },
+      }), { cookieAuth: [] }, { userToken: [] }),
+      async (c) => {
+        const userId = c.get("authUserId")!;
+        const { credentialId } = c.req.valid("param");
+        const { code, password } = c.req.valid("json");
+        await MfaService.removeWebAuthnCredential(userId, credentialId, { code, password });
+        return c.json({ message: "Credential removed" }, 200);
+      }
+    );
+
+    // Disable WebAuthn entirely
+    router.openapi(
+      withSecurity(createRoute({
+        method: "delete",
+        path: "/auth/mfa/webauthn",
+        summary: "Disable WebAuthn MFA",
+        description: "Removes all WebAuthn credentials and disables WebAuthn as an MFA method. Requires identity verification.",
+        tags,
+        request: {
+          body: {
+            content: {
+              "application/json": {
+                schema: z.object({
+                  code: z.string().optional().describe("TOTP code (if TOTP is enabled)."),
+                  password: z.string().optional().describe("Password (if TOTP is not enabled)."),
+                }),
+              },
+            },
+          },
+        },
+        responses: {
+          200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "WebAuthn disabled." },
+          400: { content: { "application/json": { schema: ErrorResponse } }, description: "Missing required verification." },
+          401: { content: { "application/json": { schema: ErrorResponse } }, description: "Invalid code/password or no valid session." },
+          501: { content: { "application/json": { schema: ErrorResponse } }, description: "Adapter does not support WebAuthn." },
+        },
+      }), { cookieAuth: [] }, { userToken: [] }),
+      async (c) => {
+        const userId = c.get("authUserId")!;
+        const { code, password } = c.req.valid("json");
+        await MfaService.disableWebAuthn(userId, { code, password });
+        return c.json({ message: "WebAuthn disabled" }, 200);
+      }
+    );
+  }
 
   return router;
 };

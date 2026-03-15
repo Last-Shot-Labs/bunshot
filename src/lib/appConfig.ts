@@ -106,6 +106,25 @@ export interface MfaEmailOtpConfig {
   codeLength?: number;
 }
 
+export interface MfaWebAuthnConfig {
+  /** Relying Party ID — typically the domain (e.g. "example.com"). Required. */
+  rpId: string;
+  /** Relying Party name shown in browser prompts. Defaults to app name. */
+  rpName?: string;
+  /** Expected origin(s) — full origin URL(s) like "https://example.com". Required. */
+  origin: string | string[];
+  /** Supported attestation conveyance preference. Default: "none". */
+  attestationType?: "none" | "direct" | "enterprise";
+  /** Authenticator attachment preference. Default: undefined (allows both platform + cross-platform). */
+  authenticatorAttachment?: "platform" | "cross-platform";
+  /** User verification requirement. Default: "preferred". */
+  userVerification?: "required" | "preferred" | "discouraged";
+  /** Timeout for ceremonies in milliseconds. Default: 60000 (60s). */
+  timeout?: number;
+  /** Reject authentication when sign count goes backward (cloned key detection). Default: false (accept + warn). */
+  strictSignCount?: boolean;
+}
+
 export interface MfaConfig {
   /** Issuer name shown in authenticator apps. Defaults to app name. */
   issuer?: string;
@@ -121,6 +140,8 @@ export interface MfaConfig {
   challengeTtlSeconds?: number;
   /** Email OTP configuration. When set, enables email-based MFA as an option. */
   emailOtp?: MfaEmailOtpConfig;
+  /** WebAuthn/FIDO2 configuration. When set, enables security key MFA routes. */
+  webauthn?: MfaWebAuthnConfig;
 }
 
 let _mfaConfig: MfaConfig | null = null;
@@ -136,3 +157,4 @@ export const getMfaRecoveryCodeCount = (): number => _mfaConfig?.recoveryCodes ?
 export const getMfaChallengeTtl = (): number => _mfaConfig?.challengeTtlSeconds ?? 300;
 export const getMfaEmailOtpConfig = (): MfaEmailOtpConfig | null => _mfaConfig?.emailOtp ?? null;
 export const getMfaEmailOtpCodeLength = (): number => _mfaConfig?.emailOtp?.codeLength ?? 6;
+export const getMfaWebAuthnConfig = (): MfaWebAuthnConfig | null => _mfaConfig?.webauthn ?? null;

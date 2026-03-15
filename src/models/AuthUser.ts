@@ -18,6 +18,15 @@ interface IAuthUser {
   recoveryCodes?: string[];
   /** MFA methods enabled for this user (e.g., ["totp"], ["emailOtp"], ["totp", "emailOtp"]). */
   mfaMethods?: string[];
+  /** WebAuthn credentials (security keys / platform authenticators). */
+  webauthnCredentials?: Array<{
+    credentialId: string;
+    publicKey: string;
+    signCount: number;
+    transports?: string[];
+    name?: string;
+    createdAt: Date;
+  }>;
 }
 
 type AuthUserDocument = IAuthUser & Document;
@@ -47,6 +56,15 @@ function getAuthUser() {
         recoveryCodes: [{ type: String }],
         /** MFA methods enabled for this user. */
         mfaMethods: [{ type: String }],
+        /** WebAuthn credentials (security keys / platform authenticators). */
+        webauthnCredentials: [{
+          credentialId: { type: String, required: true },
+          publicKey: { type: String, required: true },
+          signCount: { type: Number, required: true, default: 0 },
+          transports: [{ type: String }],
+          name: { type: String },
+          createdAt: { type: Date, default: Date.now },
+        }],
       },
       { timestamps: true }
     );

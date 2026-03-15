@@ -11,7 +11,7 @@ import { identify } from "@middleware/identify";
 import type { AppEnv } from "@lib/context";
 import { HEADER_USER_TOKEN, HEADER_REFRESH_TOKEN } from "@lib/constants";
 import { setAppName, setAppRoles, setDefaultRole, setPrimaryField, setEmailVerificationConfig, setPasswordResetConfig, setMaxSessions, setPersistSessionMetadata, setIncludeInactiveSessions, setTrackLastActive, setRefreshTokenConfig, setMfaConfig } from "@lib/appConfig";
-import type { PrimaryField, EmailVerificationConfig, PasswordResetConfig, RefreshTokenConfig, MfaConfig, MfaEmailOtpConfig } from "@lib/appConfig";
+import type { PrimaryField, EmailVerificationConfig, PasswordResetConfig, RefreshTokenConfig, MfaConfig, MfaEmailOtpConfig, MfaWebAuthnConfig } from "@lib/appConfig";
 import { setEmailVerificationStore } from "@lib/emailVerification";
 import { setPasswordResetStore } from "@lib/resetPassword";
 import { setAuthRateLimitStore } from "@lib/authRateLimit";
@@ -198,7 +198,7 @@ export interface AuthSessionPolicyConfig {
   trackLastActive?: boolean;
 }
 
-export type { PrimaryField, EmailVerificationConfig, PasswordResetConfig, RefreshTokenConfig, MfaConfig, MfaEmailOtpConfig };
+export type { PrimaryField, EmailVerificationConfig, PasswordResetConfig, RefreshTokenConfig, MfaConfig, MfaEmailOtpConfig, MfaWebAuthnConfig };
 
 export interface BotProtectionConfig {
   /**

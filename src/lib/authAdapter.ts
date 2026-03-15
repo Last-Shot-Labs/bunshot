@@ -4,6 +4,21 @@ export interface OAuthProfile {
   avatarUrl?: string;
 }
 
+export interface WebAuthnCredential {
+  /** Base64url-encoded credential ID. */
+  credentialId: string;
+  /** Base64url-encoded public key. */
+  publicKey: string;
+  /** Counter for signature verification (replay protection). */
+  signCount: number;
+  /** Transport hints from the authenticator (usb, ble, nfc, internal). */
+  transports?: string[];
+  /** User-assigned name for the key (e.g. "YubiKey 5"). */
+  name?: string;
+  /** When the credential was registered (epoch ms). */
+  createdAt: number;
+}
+
 export interface AuthAdapter {
   findByEmail(email: string): Promise<{ id: string; passwordHash: string } | null>;
   create(email: string, passwordHash: string): Promise<{ id: string }>;
@@ -64,6 +79,16 @@ export interface AuthAdapter {
   addTenantRole?(userId: string, tenantId: string, role: string): Promise<void>;
   /** Optional. Remove a single role from a user within a specific tenant. */
   removeTenantRole?(userId: string, tenantId: string, role: string): Promise<void>;
+  /** Optional. Get all WebAuthn credentials for a user. */
+  getWebAuthnCredentials?(userId: string): Promise<WebAuthnCredential[]>;
+  /** Optional. Add a WebAuthn credential for a user. */
+  addWebAuthnCredential?(userId: string, credential: WebAuthnCredential): Promise<void>;
+  /** Optional. Remove a WebAuthn credential by its credential ID. */
+  removeWebAuthnCredential?(userId: string, credentialId: string): Promise<void>;
+  /** Optional. Update the sign count for a WebAuthn credential after successful authentication. */
+  updateWebAuthnCredentialSignCount?(userId: string, credentialId: string, signCount: number): Promise<void>;
+  /** Optional. Find the user who owns a WebAuthn credential. Returns userId or null. Used for cross-user uniqueness checks. */
+  findUserByWebAuthnCredentialId?(credentialId: string): Promise<string | null>;
 }
 
 let _adapter: AuthAdapter | null = null;

@@ -65,7 +65,8 @@
     "mongoose": ">=9.0 <10",
     "ioredis": ">=5.0 <6",
     "bullmq": ">=5.0 <6",
-    "otpauth": ">=9.0 <10"
+    "otpauth": ">=9.0 <10",
+    "@simplewebauthn/server": ">=10.0.0"
   },
   "peerDependenciesMeta": {
     "mongoose": {
@@ -79,6 +80,9 @@
     },
     "otpauth": {
       "optional": true
+    },
+    "@simplewebauthn/server": {
+      "optional": true
     }
   },
   "devDependencies": {
@@ -90,7 +94,8 @@
     "otpauth": "^9.5.0",
     "tsc-alias": "^1.8.16",
     "typescript": "^5.9.3",
-    "zod": ">=4.0"
+    "zod": ">=4.0",
+    "@simplewebauthn/server": "^13.1.1"
   },
   "publishConfig": {
     "access": "public"

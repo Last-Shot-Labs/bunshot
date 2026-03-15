@@ -3,10 +3,10 @@ import { HttpError } from "@lib/HttpError";
 import { signToken, verifyToken } from "@lib/jwt";
 import { createSession, deleteSession, getActiveSessionCount, evictOldestSession, deleteUserSessions, setRefreshToken, getSessionByRefreshToken, rotateRefreshToken } from "@lib/session";
 import type { SessionMetadata } from "@lib/session";
-import { getDefaultRole, getPrimaryField, getEmailVerificationConfig, getMaxSessions, getRefreshTokenConfig, getAccessTokenExpiry, getRefreshTokenExpiry, getMfaConfig, getMfaEmailOtpConfig } from "@lib/appConfig";
+import { getDefaultRole, getPrimaryField, getEmailVerificationConfig, getMaxSessions, getRefreshTokenConfig, getAccessTokenExpiry, getRefreshTokenExpiry, getMfaConfig, getMfaEmailOtpConfig, getMfaWebAuthnConfig } from "@lib/appConfig";
 import { createVerificationToken } from "@lib/emailVerification";
 import { createMfaChallenge } from "@lib/mfaChallenge";
-import { generateEmailOtpCode } from "@services/mfa";
+import { generateEmailOtpCode, generateWebAuthnAuthenticationOptions } from "@services/mfa";
 
 export interface AuthResult {
   token: string;
@@ -18,6 +18,7 @@ export interface AuthResult {
   mfaRequired?: boolean;
   mfaToken?: string;
   mfaMethods?: string[];
+  webauthnOptions?: Record<string, unknown>;
 }
 
 async function createSessionWithRefreshToken(userId: string, sessionId: string, metadata?: SessionMetadata): Promise<{ token: string; refreshToken?: string; sessionId: string }> {
@@ -104,8 +105,20 @@ export const login = async (identifier: string, password: string, metadata?: Ses
       if (email) await emailOtpConfig.onSend(email, code);
     }
 
-    const mfaToken = await createMfaChallenge(user.id, emailOtpHash);
-    return { token: "", userId: user.id, mfaRequired: true, mfaToken, mfaMethods: methods };
+    // Generate WebAuthn authentication options if enabled
+    let webauthnChallenge: string | undefined;
+    let webauthnOptions: Record<string, unknown> | undefined;
+    const webauthnConfig = getMfaWebAuthnConfig();
+    if (methods.includes("webauthn") && webauthnConfig && adapter.getWebAuthnCredentials) {
+      const result = await generateWebAuthnAuthenticationOptions(user.id);
+      if (result) {
+        webauthnChallenge = result.challenge;
+        webauthnOptions = result.options;
+      }
+    }
+
+    const mfaToken = await createMfaChallenge(user.id, { emailOtpHash, webauthnChallenge });
+    return { token: "", userId: user.id, mfaRequired: true, mfaToken, mfaMethods: methods, webauthnOptions };
   }
 
   const sessionId = crypto.randomUUID();

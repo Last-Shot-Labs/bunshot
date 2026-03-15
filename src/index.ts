@@ -1,7 +1,7 @@
 // App factory
 export { createApp } from "./app";
 export { createServer } from "./server";
-export type { CreateAppConfig, ModelSchemasConfig, DbConfig, AppMeta, AuthConfig, AuthRateLimitConfig, AccountDeletionConfig, OAuthConfig, SecurityConfig, BotProtectionConfig, PrimaryField, EmailVerificationConfig, PasswordResetConfig, RefreshTokenConfig, MfaConfig, MfaEmailOtpConfig, JobsConfig, TenancyConfig, TenantConfig } from "./app";
+export type { CreateAppConfig, ModelSchemasConfig, DbConfig, AppMeta, AuthConfig, AuthRateLimitConfig, AccountDeletionConfig, OAuthConfig, SecurityConfig, BotProtectionConfig, PrimaryField, EmailVerificationConfig, PasswordResetConfig, RefreshTokenConfig, MfaConfig, MfaEmailOtpConfig, MfaWebAuthnConfig, JobsConfig, TenancyConfig, TenantConfig } from "./app";
 export type { CreateServerConfig, WsConfig } from "./server";
 
 // Database
@@ -25,9 +25,9 @@ export { createResetToken, consumeResetToken, setPasswordResetStore } from "@lib
 export { createSession, getSession, deleteSession, getUserSessions, getActiveSessionCount, evictOldestSession, updateSessionLastActive, setSessionStore, deleteUserSessions, setRefreshToken, getSessionByRefreshToken, rotateRefreshToken } from "@lib/session";
 export type { SessionMetadata, SessionInfo, RefreshResult } from "@lib/session";
 export { createVerificationToken, getVerificationToken, deleteVerificationToken } from "@lib/emailVerification";
-export { createMfaChallenge, consumeMfaChallenge, replaceMfaChallengeOtp, setMfaChallengeStore } from "@lib/mfaChallenge";
-export type { MfaChallengeData } from "@lib/mfaChallenge";
-export { bustAuthLimit, trackAttempt, isLimited } from "@lib/authRateLimit";
+export { createMfaChallenge, consumeMfaChallenge, replaceMfaChallengeOtp, setMfaChallengeStore, createWebAuthnRegistrationChallenge, consumeWebAuthnRegistrationChallenge } from "@lib/mfaChallenge";
+export type { MfaChallengeData, MfaChallengeOptions, MfaChallengePurpose } from "@lib/mfaChallenge";
+export { bustAuthLimit, trackAttempt, isLimited, clearMemoryRateLimitStore } from "@lib/authRateLimit";
 export type { LimitOpts } from "@lib/authRateLimit";
 export { validate } from "@lib/validate";
 
@@ -50,7 +50,7 @@ export { buildFingerprint } from "@lib/fingerprint";
 export { sqliteAuthAdapter, setSqliteDb, startSqliteCleanup } from "./adapters/sqliteAuth";
 export { memoryAuthAdapter, clearMemoryStore } from "./adapters/memoryAuth";
 export { setUserRoles, addUserRole, removeUserRole, getTenantRoles, setTenantRoles, addTenantRole, removeTenantRole } from "@lib/roles";
-export type { AuthAdapter, OAuthProfile } from "@lib/authAdapter";
+export type { AuthAdapter, OAuthProfile, WebAuthnCredential } from "@lib/authAdapter";
 export type { OAuthProviderConfig } from "@lib/oauth";
 
 // WebSocket

@@ -27,7 +27,7 @@ import {
   createVerificationToken, getVerificationToken, deleteVerificationToken,  // email verification tokens
   createResetToken, consumeResetToken, setPasswordResetStore,              // password reset tokens
   createMfaChallenge, consumeMfaChallenge, replaceMfaChallengeOtp, setMfaChallengeStore, // MFA challenge tokens
-  bustAuthLimit, trackAttempt, isLimited,          // auth rate limiting — use in custom routes or admin unlocks
+  bustAuthLimit, trackAttempt, isLimited, clearMemoryRateLimitStore, // auth rate limiting — use in custom routes or admin unlocks
   buildFingerprint,                                // HTTP fingerprint hash (IP-independent) — use in custom bot detection logic
   sqliteAuthAdapter, setSqliteDb, startSqliteCleanup,  // SQLite backend (persisted)
   memoryAuthAdapter, clearMemoryStore,                 // in-memory backend (ephemeral)

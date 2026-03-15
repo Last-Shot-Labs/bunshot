@@ -1,7 +1,8 @@
 import { HttpError } from "@lib/HttpError";
-import type { AuthAdapter, OAuthProfile } from "@lib/authAdapter";
+import type { AuthAdapter, OAuthProfile, WebAuthnCredential } from "@lib/authAdapter";
 import type { SessionMetadata, SessionInfo } from "@lib/session";
 import { getPersistSessionMetadata, getIncludeInactiveSessions } from "@lib/appConfig";
+import { clearMemoryRateLimitStore } from "@lib/authRateLimit";
 
 // ---------------------------------------------------------------------------
 // In-memory stores — module-level Maps, always ready, lost on process restart
@@ -18,6 +19,7 @@ interface UserRecord {
   mfaEnabled: boolean;
   recoveryCodes: string[];
   mfaMethods: string[];
+  webauthnCredentials: WebAuthnCredential[];
 }
 
 interface MemorySession {
@@ -57,6 +59,7 @@ export const clearMemoryStore = (): void => {
   _cache.clear();
   _verificationTokens.clear();
   _resetTokens.clear();
+  clearMemoryRateLimitStore();
 };
 
 // ---------------------------------------------------------------------------
@@ -76,7 +79,7 @@ export const memoryAuthAdapter: AuthAdapter = {
     const normalised = email.toLowerCase();
     if (_byEmail.has(normalised)) throw new HttpError(409, "Email already registered");
     const id = crypto.randomUUID();
-    const user: UserRecord = { id, email: normalised, passwordHash, providerIds: [], roles: [], emailVerified: false, mfaSecret: null, mfaEnabled: false, recoveryCodes: [], mfaMethods: [] };
+    const user: UserRecord = { id, email: normalised, passwordHash, providerIds: [], roles: [], emailVerified: false, mfaSecret: null, mfaEnabled: false, recoveryCodes: [], mfaMethods: [], webauthnCredentials: [] };
     _users.set(id, user);
     _byEmail.set(normalised, id);
     return { id };
@@ -104,7 +107,7 @@ export const memoryAuthAdapter: AuthAdapter = {
 
     const id = crypto.randomUUID();
     const email = profile.email ? profile.email.toLowerCase() : null;
-    const user: UserRecord = { id, email, passwordHash: null, providerIds: [key], roles: [], emailVerified: false, mfaSecret: null, mfaEnabled: false, recoveryCodes: [], mfaMethods: [] };
+    const user: UserRecord = { id, email, passwordHash: null, providerIds: [key], roles: [], emailVerified: false, mfaSecret: null, mfaEnabled: false, recoveryCodes: [], mfaMethods: [], webauthnCredentials: [] };
     _users.set(id, user);
     if (email) _byEmail.set(email, id);
     return { id, created: true };
@@ -214,6 +217,29 @@ export const memoryAuthAdapter: AuthAdapter = {
   async setMfaMethods(userId, methods) {
     const user = _users.get(userId);
     if (user) user.mfaMethods = [...methods];
+  },
+  async getWebAuthnCredentials(userId) {
+    return [...(_users.get(userId)?.webauthnCredentials ?? [])];
+  },
+  async addWebAuthnCredential(userId, credential) {
+    const user = _users.get(userId);
+    if (user) user.webauthnCredentials.push({ ...credential });
+  },
+  async removeWebAuthnCredential(userId, credentialId) {
+    const user = _users.get(userId);
+    if (user) user.webauthnCredentials = user.webauthnCredentials.filter((c) => c.credentialId !== credentialId);
+  },
+  async updateWebAuthnCredentialSignCount(userId, credentialId, signCount) {
+    const user = _users.get(userId);
+    if (!user) return;
+    const cred = user.webauthnCredentials.find((c) => c.credentialId === credentialId);
+    if (cred) cred.signCount = signCount;
+  },
+  async findUserByWebAuthnCredentialId(credentialId) {
+    for (const user of _users.values()) {
+      if (user.webauthnCredentials.some((c) => c.credentialId === credentialId)) return user.id;
+    }
+    return null;
   },
   async getTenantRoles(userId, tenantId) {
     return _tenantRoles.get(`${userId}:${tenantId}`) ?? [];

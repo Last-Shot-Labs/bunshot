@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { HttpError } from "@lib/HttpError";
-import type { AuthAdapter } from "@lib/authAdapter";
+import type { AuthAdapter, WebAuthnCredential } from "@lib/authAdapter";
 
 // ---------------------------------------------------------------------------
 // DB singleton — call setSqliteDb(path) once at startup
@@ -88,6 +88,16 @@ function initSchema(db: Database): void {
     PRIMARY KEY (userId, tenantId, role)
   )`);
   db.run("CREATE INDEX IF NOT EXISTS idx_tenant_roles_tenant ON tenant_roles(tenantId)");
+  db.run(`CREATE TABLE IF NOT EXISTS webauthn_credentials (
+    credentialId TEXT PRIMARY KEY,
+    userId       TEXT NOT NULL,
+    publicKey    TEXT NOT NULL,
+    signCount    INTEGER NOT NULL DEFAULT 0,
+    transports   TEXT NOT NULL DEFAULT '[]',
+    name         TEXT,
+    createdAt    INTEGER NOT NULL
+  )`);
+  db.run("CREATE INDEX IF NOT EXISTS idx_webauthn_userId ON webauthn_credentials(userId)");
 }
 
 // ---------------------------------------------------------------------------
@@ -282,6 +292,40 @@ export const sqliteAuthAdapter: AuthAdapter = {
   },
   async setMfaMethods(userId, methods) {
     getDb().run("UPDATE users SET mfaMethods = ? WHERE id = ?", [JSON.stringify(methods), userId]);
+  },
+  async getWebAuthnCredentials(userId) {
+    const rows = getDb().query<{
+      credentialId: string; publicKey: string; signCount: number;
+      transports: string; name: string | null; createdAt: number;
+    }, [string]>(
+      "SELECT credentialId, publicKey, signCount, transports, name, createdAt FROM webauthn_credentials WHERE userId = ?"
+    ).all(userId);
+    return rows.map((r) => ({
+      credentialId: r.credentialId,
+      publicKey: r.publicKey,
+      signCount: r.signCount,
+      transports: JSON.parse(r.transports) as string[],
+      name: r.name ?? undefined,
+      createdAt: r.createdAt,
+    }));
+  },
+  async addWebAuthnCredential(userId, credential) {
+    getDb().run(
+      "INSERT INTO webauthn_credentials (credentialId, userId, publicKey, signCount, transports, name, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [credential.credentialId, userId, credential.publicKey, credential.signCount, JSON.stringify(credential.transports ?? []), credential.name ?? null, credential.createdAt]
+    );
+  },
+  async removeWebAuthnCredential(userId, credentialId) {
+    getDb().run("DELETE FROM webauthn_credentials WHERE credentialId = ? AND userId = ?", [credentialId, userId]);
+  },
+  async updateWebAuthnCredentialSignCount(userId, credentialId, signCount) {
+    getDb().run("UPDATE webauthn_credentials SET signCount = ? WHERE credentialId = ? AND userId = ?", [signCount, credentialId, userId]);
+  },
+  async findUserByWebAuthnCredentialId(credentialId) {
+    const row = getDb().query<{ userId: string }, [string]>(
+      "SELECT userId FROM webauthn_credentials WHERE credentialId = ?"
+    ).get(credentialId);
+    return row?.userId ?? null;
   },
   async getTenantRoles(userId, tenantId) {
     const rows = getDb().query<{ role: string }, [string, string]>(

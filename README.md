@@ -1511,6 +1511,69 @@ This two-step flow ensures the `onSend` callback actually delivers emails before
 - If email OTP is the only method: requires the account password in the `password` field
 - Disabling the last MFA method turns off MFA entirely
 
+### WebAuthn / Security Keys
+
+Hardware security keys (YubiKey, etc.) and platform authenticators (Touch ID, Windows Hello) via the WebAuthn/FIDO2 standard. Users can register multiple keys and use them as an MFA method alongside TOTP and email OTP.
+
+```ts
+await createServer({
+  auth: {
+    mfa: {
+      webauthn: {
+        rpId: "example.com",              // Relying Party ID — your domain
+        origin: "https://example.com",    // Expected origin(s)
+        rpName: "My App",                 // Display name (default: app name)
+        userVerification: "preferred",    // "required" | "preferred" | "discouraged"
+        timeout: 60000,                   // Ceremony timeout in ms (default: 60000)
+        strictSignCount: false,           // Reject when sign count goes backward (default: false — warn only)
+      },
+    },
+  },
+});
+```
+
+Requires `@simplewebauthn/server` peer dependency:
+
+```bash
+bun add @simplewebauthn/server
+```
+
+If `mfa.webauthn` is configured but the dependency is missing, the server fails fast at startup with a clear error message.
+
+#### Endpoints
+
+| Endpoint | Auth | Purpose |
+|---|---|---|
+| `POST /auth/mfa/webauthn/register-options` | userAuth | Generate registration options for `navigator.credentials.create()` |
+| `POST /auth/mfa/webauthn/register` | userAuth | Verify attestation and store credential |
+| `GET /auth/mfa/webauthn/credentials` | userAuth | List registered security keys |
+| `DELETE /auth/mfa/webauthn/credentials/:credentialId` | userAuth | Remove a single key |
+| `DELETE /auth/mfa/webauthn` | userAuth | Disable WebAuthn entirely |
+
+#### Registration flow
+
+1. `POST /auth/mfa/webauthn/register-options` → returns `{ options, registrationToken }`
+2. Client passes `options` to `navigator.credentials.create()` — browser prompts user to tap/scan key
+3. `POST /auth/mfa/webauthn/register` with `{ registrationToken, attestationResponse, name? }` → stores credential → returns recovery codes
+
+#### Login flow with WebAuthn
+
+1. `POST /auth/login` → `{ mfaRequired: true, mfaToken, mfaMethods: ["webauthn"], webauthnOptions: {...} }`
+2. Client passes `webauthnOptions` to `navigator.credentials.get()` — browser prompts for key
+3. `POST /auth/mfa/verify` with `{ mfaToken, webauthnResponse: {...} }` → creates session
+
+The `webauthnOptions` object follows the WebAuthn spec — pass it directly to `navigator.credentials.get()`. The `webauthnResponse` is the full result from the browser API.
+
+#### Credential removal
+
+- Removing a spare key (other keys or MFA methods still active): no extra verification needed
+- Removing the last credential of the last MFA method: requires TOTP code or password
+- `DELETE /auth/mfa/webauthn` (disable all): always requires verification
+
+#### Sign count validation
+
+WebAuthn authenticators increment a sign count on each use to detect cloned keys. By default, a backward count logs a warning but allows authentication. Set `strictSignCount: true` to reject authentication when the count goes backward.
+
 ### Account Deletion
 
 Enable `DELETE /auth/me` for user-initiated account deletion:
@@ -2170,6 +2233,9 @@ bun add bullmq
 
 # MFA / TOTP
 bun add otpauth
+
+# MFA / WebAuthn (security keys, Touch ID, Windows Hello)
+bun add @simplewebauthn/server
 ```
 
 | Package | Required version | When you need it |
@@ -2177,7 +2243,8 @@ bun add otpauth
 | `mongoose` | `>=9.0 <10` | `db.auth: "mongo"`, `db.sessions: "mongo"`, or `db.cache: "mongo"` |
 | `ioredis` | `>=5.0 <6` | `db.redis: true` (the default), or any store set to `"redis"` |
 | `bullmq` | `>=5.0 <6` | Workers / queues |
-| `otpauth` | `>=9.0 <10` | `auth.mfa` configuration |
+| `otpauth` | `>=9.0 <10` | `auth.mfa` configuration (TOTP) |
+| `@simplewebauthn/server` | `>=10.0.0` | `auth.mfa.webauthn` configuration |
 
 If you're running fully on SQLite or memory (no Redis, no MongoDB), none of the optional peers are needed.
 
@@ -2454,7 +2521,7 @@ import {
   createVerificationToken, getVerificationToken, deleteVerificationToken,  // email verification tokens
   createResetToken, consumeResetToken, setPasswordResetStore,              // password reset tokens
   createMfaChallenge, consumeMfaChallenge, replaceMfaChallengeOtp, setMfaChallengeStore, // MFA challenge tokens
-  bustAuthLimit, trackAttempt, isLimited,          // auth rate limiting — use in custom routes or admin unlocks
+  bustAuthLimit, trackAttempt, isLimited, clearMemoryRateLimitStore, // auth rate limiting — use in custom routes or admin unlocks
   buildFingerprint,                                // HTTP fingerprint hash (IP-independent) — use in custom bot detection logic
   sqliteAuthAdapter, setSqliteDb, startSqliteCleanup,  // SQLite backend (persisted)
   memoryAuthAdapter, clearMemoryStore,                 // in-memory backend (ephemeral)

@@ -102,3 +102,8 @@ export const trackAttempt = async (key: string, opts: LimitOpts): Promise<boolea
 export const bustAuthLimit = async (key: string): Promise<void> => {
   await _store.delete(key);
 };
+
+/** Clears all in-memory rate limit entries. Called by clearMemoryStore(). */
+export const clearMemoryRateLimitStore = (): void => {
+  _memoryStore.clear();
+};

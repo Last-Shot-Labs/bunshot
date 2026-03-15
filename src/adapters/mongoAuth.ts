@@ -1,7 +1,7 @@
 import { AuthUser } from "@models/AuthUser";
 import { TenantRole } from "@models/TenantRole";
 import { HttpError } from "@lib/HttpError";
-import type { AuthAdapter } from "@lib/authAdapter";
+import type { AuthAdapter, WebAuthnCredential } from "@lib/authAdapter";
 
 export const mongoAuthAdapter: AuthAdapter = {
   async findByEmail(email) {
@@ -129,6 +129,50 @@ export const mongoAuthAdapter: AuthAdapter = {
   },
   async setMfaMethods(userId, methods) {
     await AuthUser.findByIdAndUpdate(userId, { mfaMethods: methods });
+  },
+  async getWebAuthnCredentials(userId) {
+    const user = await AuthUser.findById(userId, "webauthnCredentials").lean();
+    const creds = (user as any)?.webauthnCredentials ?? [];
+    return creds.map((c: any) => ({
+      credentialId: c.credentialId as string,
+      publicKey: c.publicKey as string,
+      signCount: c.signCount as number,
+      transports: c.transports as string[] | undefined,
+      name: c.name as string | undefined,
+      createdAt: c.createdAt instanceof Date ? c.createdAt.getTime() : (c.createdAt as number),
+    }));
+  },
+  async addWebAuthnCredential(userId, credential) {
+    await AuthUser.findByIdAndUpdate(userId, {
+      $push: {
+        webauthnCredentials: {
+          credentialId: credential.credentialId,
+          publicKey: credential.publicKey,
+          signCount: credential.signCount,
+          transports: credential.transports,
+          name: credential.name,
+          createdAt: new Date(credential.createdAt),
+        },
+      },
+    });
+  },
+  async removeWebAuthnCredential(userId, credentialId) {
+    await AuthUser.findByIdAndUpdate(userId, {
+      $pull: { webauthnCredentials: { credentialId } },
+    });
+  },
+  async updateWebAuthnCredentialSignCount(userId, credentialId, signCount) {
+    await AuthUser.findOneAndUpdate(
+      { _id: userId, "webauthnCredentials.credentialId": credentialId },
+      { $set: { "webauthnCredentials.$.signCount": signCount } }
+    );
+  },
+  async findUserByWebAuthnCredentialId(credentialId) {
+    const user = await AuthUser.findOne(
+      { "webauthnCredentials.credentialId": credentialId },
+      "_id"
+    ).lean();
+    return user ? String(user._id) : null;
   },
   async getTenantRoles(userId, tenantId) {
     const doc = await TenantRole.findOne({ userId, tenantId }, "roles").lean();

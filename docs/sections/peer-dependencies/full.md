@@ -31,6 +31,9 @@ bun add bullmq
 
 # MFA / TOTP
 bun add otpauth
+
+# MFA / WebAuthn (security keys, Touch ID, Windows Hello)
+bun add @simplewebauthn/server
 ```
 
 | Package | Required version | When you need it |
@@ -38,6 +41,7 @@ bun add otpauth
 | `mongoose` | `>=9.0 <10` | `db.auth: "mongo"`, `db.sessions: "mongo"`, or `db.cache: "mongo"` |
 | `ioredis` | `>=5.0 <6` | `db.redis: true` (the default), or any store set to `"redis"` |
 | `bullmq` | `>=5.0 <6` | Workers / queues |
-| `otpauth` | `>=9.0 <10` | `auth.mfa` configuration |
+| `otpauth` | `>=9.0 <10` | `auth.mfa` configuration (TOTP) |
+| `@simplewebauthn/server` | `>=10.0.0` | `auth.mfa.webauthn` configuration |
 
 If you're running fully on SQLite or memory (no Redis, no MongoDB), none of the optional peers are needed.
