@@ -13,20 +13,20 @@ import {
 import { getAuthAdapter } from "@lib/authAdapter";
 import { HttpError } from "@lib/HttpError";
 import { signToken } from "@lib/jwt";
-import { createSession, getActiveSessionCount, evictOldestSession } from "@lib/session";
-import { COOKIE_TOKEN } from "@lib/constants";
+import { createSession, getActiveSessionCount, evictOldestSession, setRefreshToken } from "@lib/session";
+import { COOKIE_TOKEN, COOKIE_REFRESH_TOKEN } from "@lib/constants";
 import { userAuth } from "@middleware/userAuth";
-import { getDefaultRole, getMaxSessions } from "@lib/appConfig";
+import { getDefaultRole, getMaxSessions, getRefreshTokenConfig, getAccessTokenExpiry, getRefreshTokenExpiry } from "@lib/appConfig";
 
 const isProd = process.env.NODE_ENV === "production";
 
-const cookieOptions = {
+const cookieOptions = (maxAge?: number) => ({
   httpOnly: true,
   secure: isProd,
   sameSite: "Lax" as const,
   path: "/",
-  maxAge: 60 * 60 * 24 * 7,
-};
+  maxAge: maxAge ?? 60 * 60 * 24 * 7,
+});
 
 const tags = ["OAuth"];
 
@@ -56,7 +56,9 @@ const finishOAuth = async (
     if (role && adapter.setRoles) await adapter.setRoles(user.id, [role]);
   }
   const sessionId = crypto.randomUUID();
-  const token = await signToken(user.id, sessionId);
+  const rtConfig = getRefreshTokenConfig();
+  const expirySeconds = rtConfig ? getAccessTokenExpiry() : undefined;
+  const token = await signToken(user.id, sessionId, expirySeconds);
   const xff = c.req.header("x-forwarded-for");
   const metadata = {
     ipAddress: (xff ? xff.split(",")[0]?.trim() : undefined) ?? c.req.header("x-real-ip") ?? undefined,
@@ -66,7 +68,14 @@ const finishOAuth = async (
     await evictOldestSession(user.id);
   }
   await createSession(user.id, token, sessionId, metadata);
-  setCookie(c, COOKIE_TOKEN, token, cookieOptions);
+  setCookie(c, COOKIE_TOKEN, token, cookieOptions(rtConfig ? getAccessTokenExpiry() : undefined));
+
+  let refreshTokenValue: string | undefined;
+  if (rtConfig) {
+    refreshTokenValue = crypto.randomUUID();
+    await setRefreshToken(sessionId, refreshTokenValue);
+    setCookie(c, COOKIE_REFRESH_TOKEN, refreshTokenValue, cookieOptions(getRefreshTokenExpiry()));
+  }
 
   // Append token to redirect so non-browser clients (mobile deep links) can extract it.
   // Browser apps can safely ignore the query param.

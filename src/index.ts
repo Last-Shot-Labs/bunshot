@@ -1,7 +1,7 @@
 // App factory
 export { createApp } from "./app";
 export { createServer } from "./server";
-export type { CreateAppConfig, ModelSchemasConfig, DbConfig, AppMeta, AuthConfig, AuthRateLimitConfig, AccountDeletionConfig, OAuthConfig, SecurityConfig, BotProtectionConfig, PrimaryField, EmailVerificationConfig, PasswordResetConfig } from "./app";
+export type { CreateAppConfig, ModelSchemasConfig, DbConfig, AppMeta, AuthConfig, AuthRateLimitConfig, AccountDeletionConfig, OAuthConfig, SecurityConfig, BotProtectionConfig, PrimaryField, EmailVerificationConfig, PasswordResetConfig, RefreshTokenConfig } from "./app";
 export type { CreateServerConfig, WsConfig } from "./server";
 
 // Database
@@ -11,7 +11,7 @@ export { connectRedis, disconnectRedis, getRedis } from "@lib/redis";
 // Lib utilities
 export { getAppRoles } from "@lib/appConfig";
 export { HttpError } from "@lib/HttpError";
-export { COOKIE_TOKEN, HEADER_USER_TOKEN } from "@lib/constants";
+export { COOKIE_TOKEN, HEADER_USER_TOKEN, COOKIE_REFRESH_TOKEN, HEADER_REFRESH_TOKEN } from "@lib/constants";
 export { createRouter } from "@lib/context";
 export { createRoute, withSecurity, registerSchema, registerSchemas } from "@lib/createRoute";
 export { zodToMongoose } from "@lib/zodToMongoose";
@@ -22,8 +22,8 @@ export type { AppEnv, AppVariables } from "@lib/context";
 export { signToken, verifyToken } from "@lib/jwt";
 export { log } from "@lib/logger";
 export { createResetToken, consumeResetToken, setPasswordResetStore } from "@lib/resetPassword";
-export { createSession, getSession, deleteSession, getUserSessions, getActiveSessionCount, evictOldestSession, updateSessionLastActive, setSessionStore, deleteUserSessions } from "@lib/session";
-export type { SessionMetadata, SessionInfo } from "@lib/session";
+export { createSession, getSession, deleteSession, getUserSessions, getActiveSessionCount, evictOldestSession, updateSessionLastActive, setSessionStore, deleteUserSessions, setRefreshToken, getSessionByRefreshToken, rotateRefreshToken } from "@lib/session";
+export type { SessionMetadata, SessionInfo, RefreshResult } from "@lib/session";
 export { createVerificationToken, getVerificationToken, deleteVerificationToken } from "@lib/emailVerification";
 export { bustAuthLimit, trackAttempt, isLimited } from "@lib/authRateLimit";
 export type { LimitOpts } from "@lib/authRateLimit";

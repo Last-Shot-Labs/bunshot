@@ -25,12 +25,16 @@ interface MemorySession {
   expiresAt: number;
   ipAddress?: string;
   userAgent?: string;
+  refreshToken?: string | null;
+  prevRefreshToken?: string | null;
+  prevTokenExpiresAt?: number | null;
 }
 
 const _users              = new Map<string, UserRecord>();
 const _byEmail            = new Map<string, string>();
 const _sessions           = new Map<string, MemorySession>();        // sessionId → session
 const _userSessionIds     = new Map<string, Set<string>>();          // userId → Set<sessionId>
+const _refreshTokenIndex  = new Map<string, string>();                // refreshToken → sessionId
 const _oauthStates        = new Map<string, { codeVerifier?: string; linkUserId?: string; expiresAt: number }>();
 const _cache              = new Map<string, { value: string; expiresAt?: number }>();
 const _verificationTokens = new Map<string, { userId: string; email: string; expiresAt: number }>();
@@ -42,6 +46,7 @@ export const clearMemoryStore = (): void => {
   _byEmail.clear();
   _sessions.clear();
   _userSessionIds.clear();
+  _refreshTokenIndex.clear();
   _oauthStates.clear();
   _cache.clear();
   _verificationTokens.clear();
@@ -198,8 +203,14 @@ export const memoryGetSession = (sessionId: string): string | null => {
 export const memoryDeleteSession = (sessionId: string): void => {
   const entry = _sessions.get(sessionId);
   if (!entry) return;
+  // Clean up refresh token reverse-lookup keys
+  if (entry.refreshToken) _refreshTokenIndex.delete(entry.refreshToken);
+  if (entry.prevRefreshToken) _refreshTokenIndex.delete(entry.prevRefreshToken);
   if (getPersistSessionMetadata()) {
     entry.token = null;
+    entry.refreshToken = null;
+    entry.prevRefreshToken = null;
+    entry.prevTokenExpiresAt = null;
   } else {
     _sessions.delete(sessionId);
     _userSessionIds.get(entry.userId)?.delete(sessionId);
@@ -260,6 +271,58 @@ export const memoryEvictOldestSession = (userId: string): void => {
 export const memoryUpdateSessionLastActive = (sessionId: string): void => {
   const entry = _sessions.get(sessionId);
   if (entry) entry.lastActiveAt = Date.now();
+};
+
+export const memorySetRefreshToken = (sessionId: string, refreshToken: string): void => {
+  const entry = _sessions.get(sessionId);
+  if (!entry) return;
+  entry.refreshToken = refreshToken;
+  _refreshTokenIndex.set(refreshToken, sessionId);
+};
+
+import type { RefreshResult } from "@lib/session";
+import { getRotationGraceSeconds } from "@lib/appConfig";
+
+export const memoryGetSessionByRefreshToken = (refreshToken: string): RefreshResult | null => {
+  const sessionId = _refreshTokenIndex.get(refreshToken);
+  if (!sessionId) return null;
+  const entry = _sessions.get(sessionId);
+  if (!entry) return null;
+
+  // Current refresh token matches
+  if (entry.refreshToken === refreshToken) {
+    return { sessionId: entry.sessionId, userId: entry.userId, newRefreshToken: refreshToken };
+  }
+
+  // Check grace window
+  if (entry.prevRefreshToken === refreshToken && entry.prevTokenExpiresAt && entry.prevTokenExpiresAt > Date.now()) {
+    return { sessionId: entry.sessionId, userId: entry.userId, newRefreshToken: entry.refreshToken! };
+  }
+
+  // Grace window expired — theft detected, invalidate session
+  if (entry.prevRefreshToken === refreshToken) {
+    memoryDeleteSession(sessionId);
+    return null;
+  }
+
+  return null;
+};
+
+export const memoryRotateRefreshToken = (sessionId: string, newRefreshToken: string, newAccessToken: string): void => {
+  const entry = _sessions.get(sessionId);
+  if (!entry) return;
+  const graceSeconds = getRotationGraceSeconds();
+
+  // Move current to prev
+  const oldRefreshToken = entry.refreshToken;
+  entry.prevRefreshToken = oldRefreshToken;
+  entry.prevTokenExpiresAt = Date.now() + graceSeconds * 1000;
+  entry.refreshToken = newRefreshToken;
+  entry.token = newAccessToken;
+
+  // Update reverse-lookup index
+  _refreshTokenIndex.set(newRefreshToken, sessionId);
+  // Old token stays in index during grace window — cleaned up on next lookup or session delete
 };
 
 // ---------------------------------------------------------------------------

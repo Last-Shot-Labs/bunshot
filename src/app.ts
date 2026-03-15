@@ -9,9 +9,9 @@ import { rateLimit } from "@middleware/rateLimit";
 import { bearerAuth } from "@middleware/bearerAuth";
 import { identify } from "@middleware/identify";
 import type { AppEnv } from "@lib/context";
-import { HEADER_USER_TOKEN } from "@lib/constants";
-import { setAppName, setAppRoles, setDefaultRole, setPrimaryField, setEmailVerificationConfig, setPasswordResetConfig, setMaxSessions, setPersistSessionMetadata, setIncludeInactiveSessions, setTrackLastActive } from "@lib/appConfig";
-import type { PrimaryField, EmailVerificationConfig, PasswordResetConfig } from "@lib/appConfig";
+import { HEADER_USER_TOKEN, HEADER_REFRESH_TOKEN } from "@lib/constants";
+import { setAppName, setAppRoles, setDefaultRole, setPrimaryField, setEmailVerificationConfig, setPasswordResetConfig, setMaxSessions, setPersistSessionMetadata, setIncludeInactiveSessions, setTrackLastActive, setRefreshTokenConfig } from "@lib/appConfig";
+import type { PrimaryField, EmailVerificationConfig, PasswordResetConfig, RefreshTokenConfig } from "@lib/appConfig";
 import { setEmailVerificationStore } from "@lib/emailVerification";
 import { setPasswordResetStore } from "@lib/resetPassword";
 import { setAuthRateLimitStore } from "@lib/authRateLimit";
@@ -151,6 +151,12 @@ export interface AuthConfig {
   sessionPolicy?: AuthSessionPolicyConfig;
   /** Account deletion configuration. Enables DELETE /auth/me when the adapter supports deleteUser. */
   accountDeletion?: AccountDeletionConfig;
+  /**
+   * Refresh token configuration. When set, login/register return short-lived access tokens
+   * (default 15 min) alongside long-lived refresh tokens (default 30 days). Mounts POST /auth/refresh.
+   * When not configured, the existing 7-day JWT behavior is unchanged.
+   */
+  refreshTokens?: RefreshTokenConfig;
 }
 
 export interface AccountDeletionConfig {
@@ -186,7 +192,7 @@ export interface AuthSessionPolicyConfig {
   trackLastActive?: boolean;
 }
 
-export type { PrimaryField, EmailVerificationConfig, PasswordResetConfig };
+export type { PrimaryField, EmailVerificationConfig, PasswordResetConfig, RefreshTokenConfig };
 
 export interface BotProtectionConfig {
   /**
@@ -374,6 +380,7 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
   setPersistSessionMetadata(sessionPolicy.persistSessionMetadata ?? true);
   setIncludeInactiveSessions(sessionPolicy.includeInactiveSessions ?? false);
   setTrackLastActive(sessionPolicy.trackLastActive ?? false);
+  setRefreshTokenConfig(authConfig.refreshTokens ?? null);
 
   if (oauthProviders) initOAuthProviders(oauthProviders);
   const configuredOAuth = getConfiguredOAuthProviders();
@@ -393,7 +400,7 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
 
   app.use(logger());
   app.use(secureHeaders());
-  app.use(cors({ origin: corsOrigins, allowHeaders: ["Content-Type", "Authorization", HEADER_USER_TOKEN], exposeHeaders: ["x-cache"], credentials: true }));
+  app.use(cors({ origin: corsOrigins, allowHeaders: ["Content-Type", "Authorization", HEADER_USER_TOKEN, HEADER_REFRESH_TOKEN], exposeHeaders: ["x-cache"], credentials: true }));
   if ((botCfg.blockList?.length ?? 0) > 0) {
     const { botProtection } = await import("@middleware/botProtection");
     app.use(botProtection({ blockList: botCfg.blockList }));
@@ -464,7 +471,7 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
 
   if (enableAuthRoutes) {
     const { createAuthRouter } = await import(`${coreRoutesDir}/auth`);
-    app.route("/", createAuthRouter({ primaryField, emailVerification, passwordReset, rateLimit: authRateLimit, accountDeletion: authConfig.accountDeletion }));
+    app.route("/", createAuthRouter({ primaryField, emailVerification, passwordReset, rateLimit: authRateLimit, accountDeletion: authConfig.accountDeletion, refreshTokens: authConfig.refreshTokens }));
   }
 
   if (configuredOAuth.length > 0) {

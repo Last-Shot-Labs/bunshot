@@ -3,14 +3,15 @@ import { z } from "zod";
 import { setCookie, getCookie, deleteCookie } from "hono/cookie";
 import * as AuthService from "@services/auth";
 import { makeRegisterSchema, makeLoginSchema } from "@schemas/auth";
-import { COOKIE_TOKEN, HEADER_USER_TOKEN } from "@lib/constants";
+import { COOKIE_TOKEN, HEADER_USER_TOKEN, COOKIE_REFRESH_TOKEN, HEADER_REFRESH_TOKEN } from "@lib/constants";
 import { userAuth } from "@middleware/userAuth";
 import { isLimited, trackAttempt, bustAuthLimit } from "@lib/authRateLimit";
 import { getAuthAdapter } from "@lib/authAdapter";
 import { createRouter } from "@lib/context";
 import { getVerificationToken, deleteVerificationToken, createVerificationToken } from "@lib/emailVerification";
 import { createResetToken, consumeResetToken } from "@lib/resetPassword";
-import type { PrimaryField, EmailVerificationConfig, PasswordResetConfig } from "@lib/appConfig";
+import type { PrimaryField, EmailVerificationConfig, PasswordResetConfig, RefreshTokenConfig } from "@lib/appConfig";
+import { getRefreshTokenExpiry, getAccessTokenExpiry } from "@lib/appConfig";
 import type { AuthRateLimitConfig, AccountDeletionConfig } from "../app";
 import { getUserSessions, deleteSession, deleteUserSessions } from "@lib/session";
 
@@ -21,17 +22,18 @@ const TokenResponse = z.object({
   email: z.string().optional().describe("User's email address (present when primaryField is 'email')."),
   emailVerified: z.boolean().optional().describe("Whether the email address has been verified (present when emailVerification is configured)."),
   googleLinked: z.boolean().optional().describe("Whether a Google OAuth account is linked to this user."),
+  refreshToken: z.string().optional().describe("Refresh token (present when refreshTokens is configured). Also set as an HttpOnly cookie."),
 }).openapi("TokenResponse");
 const ErrorResponse = z.object({ error: z.string().describe("Human-readable error message.") }).openapi("ErrorResponse");
 const tags = ["Auth"];
 
-const cookieOptions = {
+const cookieOptions = (maxAge?: number) => ({
   httpOnly: true,
   secure: isProd,
   sameSite: "Lax" as const,
   path: "/",
-  maxAge: 60 * 60 * 24 * 7, // 7 days
-};
+  maxAge: maxAge ?? 60 * 60 * 24 * 7, // 7 days
+});
 
 const clientIp = (xff: string | undefined | null, xri: string | undefined | null): string | undefined =>
   (xff ? xff.split(",")[0]?.trim() : undefined) ?? xri ?? undefined;
@@ -42,9 +44,10 @@ export interface AuthRouterOptions {
   passwordReset?: PasswordResetConfig;
   rateLimit?: AuthRateLimitConfig;
   accountDeletion?: AccountDeletionConfig;
+  refreshTokens?: RefreshTokenConfig;
 }
 
-export const createAuthRouter = ({ primaryField, emailVerification, passwordReset, rateLimit, accountDeletion }: AuthRouterOptions) => {
+export const createAuthRouter = ({ primaryField, emailVerification, passwordReset, rateLimit, accountDeletion, refreshTokens }: AuthRouterOptions) => {
   const router = createRouter();
   const RegisterSchema = makeRegisterSchema(primaryField);
   const LoginSchema = makeLoginSchema(primaryField);
@@ -86,7 +89,10 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
         userAgent: c.req.header("user-agent") ?? undefined,
       };
       const result = await AuthService.register(identifier, body.password, metadata);
-      setCookie(c, COOKIE_TOKEN, result.token, cookieOptions);
+      setCookie(c, COOKIE_TOKEN, result.token, cookieOptions(refreshTokens ? getAccessTokenExpiry() : undefined));
+      if (result.refreshToken) {
+        setCookie(c, COOKIE_REFRESH_TOKEN, result.refreshToken, cookieOptions(getRefreshTokenExpiry()));
+      }
       return c.json(result, 201);
     }
   );
@@ -120,7 +126,10 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
       try {
         const result = await AuthService.login(identifier, body.password, metadata);
         await bustAuthLimit(limitKey); // success — clear failure count
-        setCookie(c, COOKIE_TOKEN, result.token, cookieOptions);
+        setCookie(c, COOKIE_TOKEN, result.token, cookieOptions(refreshTokens ? getAccessTokenExpiry() : undefined));
+        if (result.refreshToken) {
+          setCookie(c, COOKIE_REFRESH_TOKEN, result.refreshToken, cookieOptions(getRefreshTokenExpiry()));
+        }
         return c.json(result, 200);
       } catch (err) {
         await trackAttempt(limitKey, loginOpts); // failure — count it
@@ -289,6 +298,7 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
       const token = getCookie(c, COOKIE_TOKEN) ?? c.req.header(HEADER_USER_TOKEN) ?? null;
       await AuthService.logout(token);
       deleteCookie(c, COOKIE_TOKEN, { path: "/" });
+      deleteCookie(c, COOKIE_REFRESH_TOKEN, { path: "/" });
       return c.json({ message: "Logged out" }, 200);
     }
   );
@@ -451,6 +461,55 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
         const sessions = await getUserSessions(entry.userId);
         await Promise.all(sessions.map((s) => deleteSession(s.sessionId)));
         return c.json({ message: "Password reset successfully" }, 200);
+      }
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Refresh token route — only mounted when refreshTokens is configured
+  // ---------------------------------------------------------------------------
+
+  if (refreshTokens) {
+    const RefreshResponse = z.object({
+      token: z.string().describe("New short-lived JWT access token."),
+      refreshToken: z.string().describe("New refresh token (rotation). The previous token is valid for a short grace window."),
+      userId: z.string().describe("Unique user ID."),
+    }).openapi("RefreshResponse");
+
+    router.openapi(
+      createRoute({
+        method: "post",
+        path: "/auth/refresh",
+        summary: "Refresh access token",
+        description: "Exchanges a valid refresh token for a new access token and rotated refresh token. The old refresh token remains valid for a short grace window to handle network drops. If a previously rotated token is reused after the grace window, the entire session is invalidated (token theft detection).",
+        tags,
+        request: {
+          body: {
+            content: {
+              "application/json": {
+                schema: z.object({
+                  refreshToken: z.string().optional().describe("Refresh token. Can also be sent via the refresh_token cookie or x-refresh-token header."),
+                }),
+              },
+            },
+            description: "Refresh token (optional if sent via cookie or header).",
+          },
+        },
+        responses: {
+          200: { content: { "application/json": { schema: RefreshResponse } }, description: "New access and refresh tokens." },
+          401: { content: { "application/json": { schema: ErrorResponse } }, description: "Invalid or expired refresh token, or session invalidated due to token theft detection." },
+        },
+      }),
+      async (c) => {
+        const body = c.req.valid("json");
+        const rt = body.refreshToken ?? getCookie(c, COOKIE_REFRESH_TOKEN) ?? c.req.header(HEADER_REFRESH_TOKEN) ?? null;
+        if (!rt) {
+          return c.json({ error: "Refresh token is required" }, 401);
+        }
+        const result = await AuthService.refresh(rt);
+        setCookie(c, COOKIE_TOKEN, result.token, cookieOptions(getAccessTokenExpiry()));
+        setCookie(c, COOKIE_REFRESH_TOKEN, result.refreshToken, cookieOptions(getRefreshTokenExpiry()));
+        return c.json(result, 200);
       }
     );
   }

@@ -67,3 +67,30 @@ export const getIncludeInactiveSessions = () => _includeInactiveSessions;
 
 export const setTrackLastActive = (v: boolean) => { _trackLastActive = v; };
 export const getTrackLastActive = () => _trackLastActive;
+
+// ---------------------------------------------------------------------------
+// Refresh token config
+// ---------------------------------------------------------------------------
+
+export interface RefreshTokenConfig {
+  /** Access token expiry in seconds. Default: 900 (15 min). */
+  accessTokenExpiry?: number;
+  /** Refresh token expiry in seconds. Default: 2_592_000 (30 days). */
+  refreshTokenExpiry?: number;
+  /** Grace window in seconds where the old refresh token still works after rotation.
+   *  Prevents lockout when the client's network drops mid-refresh. Default: 30. */
+  rotationGraceSeconds?: number;
+}
+
+let _refreshTokenConfig: RefreshTokenConfig | null = null;
+
+export const setRefreshTokenConfig = (config: RefreshTokenConfig | null) => { _refreshTokenConfig = config; };
+export const getRefreshTokenConfig = () => _refreshTokenConfig;
+
+const DEFAULT_ACCESS_TOKEN_EXPIRY = 900; // 15 min
+const DEFAULT_REFRESH_TOKEN_EXPIRY = 2_592_000; // 30 days
+const DEFAULT_ROTATION_GRACE_SECONDS = 30;
+
+export const getAccessTokenExpiry = (): number => _refreshTokenConfig?.accessTokenExpiry ?? DEFAULT_ACCESS_TOKEN_EXPIRY;
+export const getRefreshTokenExpiry = (): number => _refreshTokenConfig?.refreshTokenExpiry ?? DEFAULT_REFRESH_TOKEN_EXPIRY;
+export const getRotationGraceSeconds = (): number => _refreshTokenConfig?.rotationGraceSeconds ?? DEFAULT_ROTATION_GRACE_SECONDS;

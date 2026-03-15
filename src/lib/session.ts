@@ -1,6 +1,6 @@
 import { getRedis } from "./redis";
 import { appConnection, mongoose } from "./mongo";
-import { getAppName, getPersistSessionMetadata, getIncludeInactiveSessions } from "./appConfig";
+import { getAppName, getPersistSessionMetadata, getIncludeInactiveSessions, getRefreshTokenConfig, getRotationGraceSeconds, getRefreshTokenExpiry } from "./appConfig";
 import {
   sqliteCreateSession,
   sqliteGetSession,
@@ -9,6 +9,9 @@ import {
   sqliteGetActiveSessionCount,
   sqliteEvictOldestSession,
   sqliteUpdateSessionLastActive,
+  sqliteSetRefreshToken,
+  sqliteGetSessionByRefreshToken,
+  sqliteRotateRefreshToken,
 } from "../adapters/sqliteAuth";
 import {
   memoryCreateSession,
@@ -18,6 +21,9 @@ import {
   memoryGetActiveSessionCount,
   memoryEvictOldestSession,
   memoryUpdateSessionLastActive,
+  memorySetRefreshToken,
+  memoryGetSessionByRefreshToken,
+  memoryRotateRefreshToken,
 } from "../adapters/memoryAuth";
 
 // ---------------------------------------------------------------------------
@@ -52,6 +58,15 @@ interface SessionDoc {
   expiresAt: Date;
   ipAddress?: string;
   userAgent?: string;
+  refreshToken?: string | null;
+  prevRefreshToken?: string | null;
+  prevTokenExpiresAt?: Date | null;
+}
+
+export interface RefreshResult {
+  sessionId: string;
+  userId: string;
+  newRefreshToken: string;
 }
 
 function getSessionModel() {
@@ -67,9 +82,13 @@ function getSessionModel() {
       expiresAt:    { type: Date,   required: true },
       ipAddress:    { type: String },
       userAgent:    { type: String },
+      refreshToken:      { type: String, default: null, sparse: true },
+      prevRefreshToken:  { type: String, default: null },
+      prevTokenExpiresAt:{ type: Date,   default: null },
     },
     { collection: "sessions", timestamps: false }
   );
+  sessionSchema.index({ refreshToken: 1 }, { sparse: true, unique: true });
   // Add TTL index only when metadata is not persisted — docs auto-delete at expiresAt.
   // When persisting, token is nulled (soft-delete) but the row is kept indefinitely.
   if (!getPersistSessionMetadata()) {
@@ -102,6 +121,9 @@ function redisSessionKey(sessionId: string) {
 }
 function redisUserSessionsKey(userId: string) {
   return `usersessions:${getAppName()}:${userId}`;
+}
+function redisRefreshTokenKey(refreshToken: string) {
+  return `refreshtoken:${getAppName()}:${refreshToken}`;
 }
 
 async function redisCreateSession(userId: string, token: string, sessionId: string, metadata?: SessionMetadata): Promise<void> {
@@ -137,10 +159,15 @@ async function redisDeleteSession(sessionId: string): Promise<void> {
   const redis = getRedis();
   const raw = await redis.get(redisSessionKey(sessionId));
   if (!raw) return;
-  const rec = JSON.parse(raw) as { userId: string; expiresAt: number };
+  const rec = JSON.parse(raw) as { userId: string; expiresAt: number; refreshToken?: string; prevRefreshToken?: string };
   const persist = getPersistSessionMetadata();
+
+  // Clean up refresh token reverse-lookup keys
+  if (rec.refreshToken) await redis.del(redisRefreshTokenKey(rec.refreshToken));
+  if (rec.prevRefreshToken) await redis.del(redisRefreshTokenKey(rec.prevRefreshToken));
+
   if (persist) {
-    const updated = { ...JSON.parse(raw), token: null };
+    const updated = { ...rec, token: null, refreshToken: null, prevRefreshToken: null, prevTokenExpiresAt: null };
     await redis.set(redisSessionKey(sessionId), JSON.stringify(updated));
   } else {
     await redis.del(redisSessionKey(sessionId));
@@ -227,6 +254,69 @@ async function redisUpdateSessionLastActive(sessionId: string): Promise<void> {
   }
 }
 
+async function redisSetRefreshToken(sessionId: string, refreshToken: string): Promise<void> {
+  const redis = getRedis();
+  const raw = await redis.get(redisSessionKey(sessionId));
+  if (!raw) return;
+  const rec = JSON.parse(raw);
+  rec.refreshToken = refreshToken;
+  const refreshExpiry = getRefreshTokenExpiry();
+  await redis.set(redisSessionKey(sessionId), JSON.stringify(rec));
+  await redis.set(redisRefreshTokenKey(refreshToken), sessionId, "EX", refreshExpiry);
+}
+
+async function redisGetSessionByRefreshToken(refreshToken: string): Promise<RefreshResult | null> {
+  const redis = getRedis();
+  const sessionId = await redis.get(redisRefreshTokenKey(refreshToken));
+  if (!sessionId) return null;
+  const raw = await redis.get(redisSessionKey(sessionId));
+  if (!raw) return null;
+  const rec = JSON.parse(raw) as { sessionId: string; userId: string; refreshToken?: string; prevRefreshToken?: string; prevTokenExpiresAt?: number; token?: string | null };
+
+  // Current refresh token matches
+  if (rec.refreshToken === refreshToken) {
+    return { sessionId: rec.sessionId, userId: rec.userId, newRefreshToken: refreshToken };
+  }
+
+  // Check grace window: old token used within grace period
+  if (rec.prevRefreshToken === refreshToken && rec.prevTokenExpiresAt && rec.prevTokenExpiresAt > Date.now()) {
+    // Return current refresh token — client missed the rotation response
+    return { sessionId: rec.sessionId, userId: rec.userId, newRefreshToken: rec.refreshToken! };
+  }
+
+  // Old token used after grace window — token family theft detected, invalidate session
+  if (rec.prevRefreshToken === refreshToken) {
+    await redisDeleteSession(sessionId);
+    return null;
+  }
+
+  return null;
+}
+
+async function redisRotateRefreshToken(sessionId: string, newRefreshToken: string, newAccessToken: string): Promise<void> {
+  const redis = getRedis();
+  const raw = await redis.get(redisSessionKey(sessionId));
+  if (!raw) return;
+  const rec = JSON.parse(raw);
+  const graceSeconds = getRotationGraceSeconds();
+  const refreshExpiry = getRefreshTokenExpiry();
+
+  // Move current to prev with grace window
+  const oldRefreshToken = rec.refreshToken;
+  rec.prevRefreshToken = oldRefreshToken;
+  rec.prevTokenExpiresAt = Date.now() + graceSeconds * 1000;
+  rec.refreshToken = newRefreshToken;
+  rec.token = newAccessToken;
+
+  await redis.set(redisSessionKey(sessionId), JSON.stringify(rec));
+  // Set new reverse-lookup with full refresh expiry
+  await redis.set(redisRefreshTokenKey(newRefreshToken), sessionId, "EX", refreshExpiry);
+  // Update old reverse-lookup to expire after grace window
+  if (oldRefreshToken) {
+    await redis.expire(redisRefreshTokenKey(oldRefreshToken), graceSeconds);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Mongo helpers
 // ---------------------------------------------------------------------------
@@ -257,6 +347,50 @@ async function mongoGetUserSessions(userId: string): Promise<SessionInfo[]> {
     });
   }
   return results;
+}
+
+async function mongoSetRefreshToken(sessionId: string, refreshToken: string): Promise<void> {
+  await getSessionModel().updateOne({ sessionId }, { $set: { refreshToken } });
+}
+
+async function mongoGetSessionByRefreshToken(refreshToken: string): Promise<RefreshResult | null> {
+  const Session = getSessionModel();
+
+  // Check current refresh token
+  let doc = await Session.findOne({ refreshToken }).lean() as SessionDoc | null;
+  if (doc) {
+    return { sessionId: doc.sessionId, userId: doc.userId, newRefreshToken: refreshToken };
+  }
+
+  // Check previous refresh token (grace window)
+  doc = await Session.findOne({ prevRefreshToken: refreshToken }).lean() as SessionDoc | null;
+  if (!doc) return null;
+
+  if (doc.prevTokenExpiresAt && doc.prevTokenExpiresAt > new Date()) {
+    // Within grace window — return current refresh token
+    return { sessionId: doc.sessionId, userId: doc.userId, newRefreshToken: doc.refreshToken! };
+  }
+
+  // Grace window expired — token family theft detected, invalidate session
+  if (getPersistSessionMetadata()) {
+    await Session.updateOne({ sessionId: doc.sessionId }, { $set: { token: null, refreshToken: null, prevRefreshToken: null, prevTokenExpiresAt: null } });
+  } else {
+    await Session.deleteOne({ sessionId: doc.sessionId });
+  }
+  return null;
+}
+
+async function mongoRotateRefreshToken(sessionId: string, newRefreshToken: string, newAccessToken: string): Promise<void> {
+  const graceSeconds = getRotationGraceSeconds();
+  const Session = getSessionModel();
+  const doc = await Session.findOne({ sessionId });
+  if (!doc) return;
+
+  doc.prevRefreshToken = doc.refreshToken;
+  doc.prevTokenExpiresAt = new Date(Date.now() + graceSeconds * 1000);
+  doc.refreshToken = newRefreshToken;
+  doc.token = newAccessToken;
+  await doc.save();
 }
 
 // ---------------------------------------------------------------------------
@@ -303,7 +437,7 @@ export const deleteSession = async (sessionId: string): Promise<void> => {
 
   // mongo
   if (getPersistSessionMetadata()) {
-    await getSessionModel().updateOne({ sessionId }, { $set: { token: null } });
+    await getSessionModel().updateOne({ sessionId }, { $set: { token: null, refreshToken: null, prevRefreshToken: null, prevTokenExpiresAt: null } });
   } else {
     await getSessionModel().deleteOne({ sessionId });
   }
@@ -352,4 +486,32 @@ export const updateSessionLastActive = async (sessionId: string): Promise<void> 
 
   // mongo
   await getSessionModel().updateOne({ sessionId }, { $set: { lastActiveAt: new Date() } });
+};
+
+// ---------------------------------------------------------------------------
+// Refresh token API
+// ---------------------------------------------------------------------------
+
+/** Store a refresh token on an existing session (called after session creation). */
+export const setRefreshToken = async (sessionId: string, refreshToken: string): Promise<void> => {
+  if (_store === "memory") { memorySetRefreshToken(sessionId, refreshToken); return; }
+  if (_store === "sqlite") { sqliteSetRefreshToken(sessionId, refreshToken); return; }
+  if (_store === "redis")  { await redisSetRefreshToken(sessionId, refreshToken); return; }
+  await mongoSetRefreshToken(sessionId, refreshToken);
+};
+
+/** Look up a session by refresh token. Handles grace window and theft detection. */
+export const getSessionByRefreshToken = async (refreshToken: string): Promise<RefreshResult | null> => {
+  if (_store === "memory") return memoryGetSessionByRefreshToken(refreshToken);
+  if (_store === "sqlite") return sqliteGetSessionByRefreshToken(refreshToken);
+  if (_store === "redis")  return redisGetSessionByRefreshToken(refreshToken);
+  return mongoGetSessionByRefreshToken(refreshToken);
+};
+
+/** Rotate the refresh token: move current to prev with grace window, set new token + access token. */
+export const rotateRefreshToken = async (sessionId: string, newRefreshToken: string, newAccessToken: string): Promise<void> => {
+  if (_store === "memory") { memoryRotateRefreshToken(sessionId, newRefreshToken, newAccessToken); return; }
+  if (_store === "sqlite") { sqliteRotateRefreshToken(sessionId, newRefreshToken, newAccessToken); return; }
+  if (_store === "redis")  { await redisRotateRefreshToken(sessionId, newRefreshToken, newAccessToken); return; }
+  await mongoRotateRefreshToken(sessionId, newRefreshToken, newAccessToken);
 };

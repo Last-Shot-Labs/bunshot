@@ -48,6 +48,11 @@ function initSchema(db: Database): void {
     userAgent    TEXT
   )`);
   db.run("CREATE INDEX IF NOT EXISTS idx_sessions_userId ON sessions(userId)");
+  // Add refresh token columns to pre-existing databases
+  try { db.run("ALTER TABLE sessions ADD COLUMN refreshToken TEXT"); } catch { /* already exists */ }
+  try { db.run("ALTER TABLE sessions ADD COLUMN prevRefreshToken TEXT"); } catch { /* already exists */ }
+  try { db.run("ALTER TABLE sessions ADD COLUMN prevTokenExpiresAt INTEGER"); } catch { /* already exists */ }
+  db.run("CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_refreshToken ON sessions(refreshToken) WHERE refreshToken IS NOT NULL");
   db.run(`CREATE TABLE IF NOT EXISTS oauth_states (
     state        TEXT PRIMARY KEY,
     codeVerifier TEXT,
@@ -249,7 +254,7 @@ export const sqliteGetSession = (sessionId: string): string | null => {
 
 export const sqliteDeleteSession = (sessionId: string): void => {
   if (getPersistSessionMetadata()) {
-    getDb().run("UPDATE sessions SET token = NULL WHERE sessionId = ?", [sessionId]);
+    getDb().run("UPDATE sessions SET token = NULL, refreshToken = NULL, prevRefreshToken = NULL, prevTokenExpiresAt = NULL WHERE sessionId = ?", [sessionId]);
   } else {
     getDb().run("DELETE FROM sessions WHERE sessionId = ?", [sessionId]);
   }
@@ -301,6 +306,54 @@ export const sqliteEvictOldestSession = (userId: string): void => {
 
 export const sqliteUpdateSessionLastActive = (sessionId: string): void => {
   getDb().run("UPDATE sessions SET lastActiveAt = ? WHERE sessionId = ?", [Date.now(), sessionId]);
+};
+
+// ---------------------------------------------------------------------------
+// Refresh token helpers (used by src/lib/session.ts)
+// ---------------------------------------------------------------------------
+
+import type { RefreshResult } from "@lib/session";
+import { getRotationGraceSeconds } from "@lib/appConfig";
+
+export const sqliteSetRefreshToken = (sessionId: string, refreshToken: string): void => {
+  getDb().run("UPDATE sessions SET refreshToken = ? WHERE sessionId = ?", [refreshToken, sessionId]);
+};
+
+export const sqliteGetSessionByRefreshToken = (refreshToken: string): RefreshResult | null => {
+  const db = getDb();
+
+  // Check current refresh token
+  let row = db.query<{ sessionId: string; userId: string; refreshToken: string | null }, [string]>(
+    "SELECT sessionId, userId, refreshToken FROM sessions WHERE refreshToken = ?"
+  ).get(refreshToken);
+  if (row) {
+    return { sessionId: row.sessionId, userId: row.userId, newRefreshToken: refreshToken };
+  }
+
+  // Check previous refresh token (grace window)
+  row = db.query<{ sessionId: string; userId: string; refreshToken: string | null; prevTokenExpiresAt: number | null }, [string]>(
+    "SELECT sessionId, userId, refreshToken, prevTokenExpiresAt FROM sessions WHERE prevRefreshToken = ?"
+  ).get(refreshToken) as any;
+  if (!row) return null;
+
+  const prevExpiry = (row as any).prevTokenExpiresAt as number | null;
+  if (prevExpiry && prevExpiry > Date.now()) {
+    // Within grace window — return current refresh token
+    return { sessionId: row.sessionId, userId: row.userId, newRefreshToken: row.refreshToken! };
+  }
+
+  // Grace window expired — theft detected, invalidate session
+  sqliteDeleteSession(row.sessionId);
+  return null;
+};
+
+export const sqliteRotateRefreshToken = (sessionId: string, newRefreshToken: string, newAccessToken: string): void => {
+  const graceSeconds = getRotationGraceSeconds();
+  const prevTokenExpiresAt = Date.now() + graceSeconds * 1000;
+  getDb().run(
+    "UPDATE sessions SET prevRefreshToken = refreshToken, prevTokenExpiresAt = ?, refreshToken = ?, token = ? WHERE sessionId = ?",
+    [prevTokenExpiresAt, newRefreshToken, newAccessToken, sessionId]
+  );
 };
 
 // ---------------------------------------------------------------------------
