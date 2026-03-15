@@ -654,23 +654,35 @@ export const { worker, queue } = createCronWorker(
 Expose job state via REST for client-side polling (e.g., long-running uploads or exports):
 
 ```ts
+import { userAuth, requireRole } from "@lastshotlabs/bunshot";
+
 await createServer({
   jobs: {
-    statusEndpoint: true,              // default: false
-    auth: "bearerAuth",                // "bearerAuth" | "userAuth" | "none", default: "bearerAuth"
-    allowedQueues: ["export", "upload"], // whitelist — empty = nothing exposed (secure by default)
-    scopeToUser: false,                // when true with "userAuth", users only see their own jobs
+    statusEndpoint: true,                           // default: false
+    auth: "userAuth",                                // "userAuth" | "none" | MiddlewareHandler[]
+    roles: ["admin"],                                // require these roles (works with userAuth)
+    allowedQueues: ["export", "upload"],              // whitelist — empty = nothing exposed (secure by default)
+    scopeToUser: false,                              // when true with userAuth, users only see their own jobs
   },
 });
 ```
+
+**Auth options:**
+- `"userAuth"` — requires an authenticated user session. Combine with `roles` for RBAC.
+- `"none"` — no auth protection (not recommended for production).
+- `MiddlewareHandler[]` — pass a custom middleware stack for full control, e.g. `[userAuth, requireRole("admin")]`.
 
 #### Endpoints
 
 | Endpoint | Purpose |
 |---|---|
+| `GET /jobs` | List available queues |
+| `GET /jobs/:queue` | List jobs in a queue (paginated, filterable by state) |
 | `GET /jobs/:queue/:id` | Job state, progress, result, or failure reason |
 | `GET /jobs/:queue/:id/logs` | Job logs |
 | `GET /jobs/:queue/dead-letters` | Paginated list of DLQ jobs |
+
+The list endpoint (`GET /jobs/:queue`) accepts `?state=waiting|active|completed|failed|delayed|paused` and `?start=0&end=19` for pagination.
 
 ### Dead Letter Queue (DLQ)
 
@@ -1205,9 +1217,10 @@ await createServer({
   // Job status endpoint
   jobs: {
     statusEndpoint: true,                  // default: false
-    auth: "bearerAuth",                    // "bearerAuth" | "userAuth" | "none"
+    auth: "userAuth",                      // "userAuth" | "none" | MiddlewareHandler[]
+    roles: ["admin"],                      // require roles (works with userAuth)
     allowedQueues: ["export"],             // whitelist — empty = nothing exposed
-    scopeToUser: false,                    // when true with "userAuth", users see only their own jobs
+    scopeToUser: false,                    // when true with userAuth, users see only their own jobs
   },
 
   // Security

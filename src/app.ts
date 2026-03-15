@@ -261,11 +261,20 @@ export interface ModelSchemasConfig {
 export interface JobsConfig {
   /** Enable the job status endpoint. Default: false. */
   statusEndpoint?: boolean;
-  /** Auth mode for job status endpoints. Default: "bearerAuth". */
-  auth?: "bearerAuth" | "userAuth" | "none";
+  /**
+   * Auth protection for job endpoints.
+   * - `"userAuth"` — requires authenticated user session (cookie/token).
+   * - `"none"` — no auth (not recommended for production).
+   * - `MiddlewareHandler[]` — custom middleware stack (e.g., `[userAuth, requireRole("admin")]`).
+   *
+   * Default: `"none"`. You must explicitly configure auth.
+   */
+  auth?: "userAuth" | "none" | import("hono").MiddlewareHandler<AppEnv>[];
+  /** Required roles for accessing job endpoints. Only works when auth includes userAuth. */
+  roles?: string[];
   /** Whitelist of queue names exposed. Default: [] (nothing exposed). */
   allowedQueues?: string[];
-  /** When auth is "userAuth", restrict job visibility to the user who created it. Default: false. */
+  /** When using userAuth, restrict job visibility to the user who created it. Default: false. */
   scopeToUser?: boolean;
 }
 

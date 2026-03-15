@@ -2,6 +2,7 @@ import { createRoute, withSecurity } from "@lib/createRoute";
 import { z } from "zod";
 import { createRouter } from "@lib/context";
 import { userAuth } from "@middleware/userAuth";
+import { requireRole } from "@middleware/requireRole";
 import { createQueue } from "@lib/queue";
 import type { JobsConfig } from "../app";
 
@@ -22,19 +23,146 @@ const JobStatusResponse = z.object({
 export const createJobsRouter = (config: JobsConfig) => {
   const router = createRouter();
   const allowedQueues = new Set(config.allowedQueues ?? []);
-  const authMode = config.auth ?? "bearerAuth";
+  const authConfig = config.auth ?? "none";
   const scopeToUser = config.scopeToUser ?? false;
 
-  // Apply auth middleware based on config
-  if (authMode === "userAuth") {
+  // Determine if userAuth is involved (for scopeToUser and OpenAPI security schemes)
+  const hasUserAuth = authConfig === "userAuth" || Array.isArray(authConfig);
+
+  // Apply middleware based on config
+  if (authConfig === "userAuth") {
     router.use("/jobs/*", userAuth);
+    if (config.roles?.length) {
+      router.use("/jobs/*", requireRole(...config.roles));
+    }
+  } else if (Array.isArray(authConfig)) {
+    for (const mw of authConfig) {
+      router.use("/jobs/*", mw);
+    }
   }
-  // "bearerAuth" is handled by the global bearer auth middleware
-  // "none" requires no additional middleware
+  // "none" requires no middleware
 
   function isQueueAllowed(queueName: string): boolean {
     return allowedQueues.has(queueName);
   }
+
+  /** Determine OpenAPI security for a route */
+  function applyRouteSecurity<T extends ReturnType<typeof createRoute>>(route: T) {
+    if (authConfig === "userAuth") {
+      return withSecurity(route, { cookieAuth: [] }, { userToken: [] });
+    }
+    if (Array.isArray(authConfig)) {
+      // Custom middleware — mark as cookieAuth/userToken if it likely includes userAuth
+      return withSecurity(route, { cookieAuth: [] }, { userToken: [] });
+    }
+    return route;
+  }
+
+  /** Map a BullMQ job to the response shape */
+  async function jobToResponse(job: { id?: string | null; progress: unknown; returnvalue: unknown; failedReason?: string | null; attemptsMade: number; timestamp: number; finishedOn?: number | null; getState: () => Promise<string> }) {
+    const state = await job.getState();
+    return {
+      id: job.id!,
+      state,
+      progress: job.progress as number | Record<string, unknown>,
+      result: job.returnvalue,
+      failedReason: job.failedReason ?? undefined,
+      attemptsMade: job.attemptsMade,
+      timestamp: job.timestamp,
+      finishedOn: job.finishedOn ?? undefined,
+    };
+  }
+
+  // ─── List available queues ──────────────────────────────────────────────
+
+  const listQueuesRoute = createRoute({
+    method: "get",
+    path: "/jobs",
+    summary: "List available queues",
+    description: "Returns the list of queue names exposed via the API.",
+    tags,
+    responses: {
+      200: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              queues: z.array(z.string()).describe("Available queue names."),
+            }),
+          },
+        },
+        description: "Available queues.",
+      },
+    },
+  });
+
+  router.openapi(applyRouteSecurity(listQueuesRoute), async (c) => {
+    return c.json({ queues: [...allowedQueues] }, 200);
+  });
+
+  // ─── List jobs in a queue ─────────────────────────────────────────────
+
+  const listJobsRoute = createRoute({
+    method: "get",
+    path: "/jobs/{queue}",
+    summary: "List jobs in a queue",
+    description: "Returns a paginated list of jobs in a queue, optionally filtered by state.",
+    tags,
+    request: {
+      params: z.object({
+        queue: z.string().describe("Queue name."),
+      }),
+      query: z.object({
+        state: z.enum(["waiting", "active", "completed", "failed", "delayed", "paused"]).optional().describe("Filter by job state."),
+        start: z.string().optional().describe("Start index. Default: 0."),
+        end: z.string().optional().describe("End index. Default: 19."),
+      }),
+    },
+    responses: {
+      200: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              jobs: z.array(JobStatusResponse),
+              total: z.number().describe("Total jobs matching the filter."),
+            }),
+          },
+        },
+        description: "Jobs list.",
+      },
+      403: { content: { "application/json": { schema: ErrorResponse } }, description: "Queue not allowed." },
+    },
+  });
+
+  router.openapi(applyRouteSecurity(listJobsRoute), async (c) => {
+    const { queue: queueName } = c.req.valid("param");
+    if (!isQueueAllowed(queueName)) {
+      return c.json({ error: "Queue not allowed" }, 403);
+    }
+
+    const { state, start: startStr, end: endStr } = c.req.valid("query");
+    const start = startStr ? parseInt(startStr) : 0;
+    const end = endStr ? parseInt(endStr) : 19;
+
+    const queue = createQueue(queueName);
+
+    // Get jobs by state or all jobs
+    const stateFilter = state ?? "waiting";
+    const jobs = await queue.getJobs([stateFilter], start, end);
+
+    // Get total count for the filtered state
+    const counts = await queue.getJobCounts(stateFilter);
+    const total = counts[stateFilter] ?? 0;
+
+    // Optionally filter by userId
+    let filteredJobs = jobs;
+    if (scopeToUser && hasUserAuth) {
+      const userId = c.get("authUserId");
+      filteredJobs = jobs.filter((job) => (job.data as any)?.userId === userId);
+    }
+
+    const result = await Promise.all(filteredJobs.map(jobToResponse));
+    return c.json({ jobs: result, total }, 200);
+  });
 
   // ─── Get job status ─────────────────────────────────────────────────────
 
@@ -57,13 +185,7 @@ export const createJobsRouter = (config: JobsConfig) => {
     },
   });
 
-  const routeDef = authMode === "userAuth"
-    ? withSecurity(getJobRoute, { cookieAuth: [] }, { userToken: [] })
-    : authMode === "bearerAuth"
-    ? withSecurity(getJobRoute, { bearerAuth: [] })
-    : getJobRoute;
-
-  router.openapi(routeDef, async (c) => {
+  router.openapi(applyRouteSecurity(getJobRoute), async (c) => {
     const { queue: queueName, id } = c.req.valid("param");
     if (!isQueueAllowed(queueName)) {
       return c.json({ error: "Queue not allowed" }, 403);
@@ -74,24 +196,14 @@ export const createJobsRouter = (config: JobsConfig) => {
     if (!job) return c.json({ error: "Job not found" }, 404);
 
     // Scope to user if configured
-    if (scopeToUser && authMode === "userAuth") {
+    if (scopeToUser && hasUserAuth) {
       const userId = c.get("authUserId");
       if ((job.data as any)?.userId !== userId) {
         return c.json({ error: "Job not found" }, 404);
       }
     }
 
-    const state = await job.getState();
-    return c.json({
-      id: job.id!,
-      state,
-      progress: job.progress as number | Record<string, unknown>,
-      result: job.returnvalue,
-      failedReason: job.failedReason ?? undefined,
-      attemptsMade: job.attemptsMade,
-      timestamp: job.timestamp,
-      finishedOn: job.finishedOn ?? undefined,
-    }, 200);
+    return c.json(await jobToResponse(job), 200);
   });
 
   // ─── Get job logs ───────────────────────────────────────────────────────
@@ -125,13 +237,7 @@ export const createJobsRouter = (config: JobsConfig) => {
     },
   });
 
-  const logsRouteDef = authMode === "userAuth"
-    ? withSecurity(getJobLogsRoute, { cookieAuth: [] }, { userToken: [] })
-    : authMode === "bearerAuth"
-    ? withSecurity(getJobLogsRoute, { bearerAuth: [] })
-    : getJobLogsRoute;
-
-  router.openapi(logsRouteDef, async (c) => {
+  router.openapi(applyRouteSecurity(getJobLogsRoute), async (c) => {
     const { queue: queueName, id } = c.req.valid("param");
     if (!isQueueAllowed(queueName)) {
       return c.json({ error: "Queue not allowed" }, 403);
@@ -176,13 +282,7 @@ export const createJobsRouter = (config: JobsConfig) => {
     },
   });
 
-  const dlqRouteDef = authMode === "userAuth"
-    ? withSecurity(getDlqRoute, { cookieAuth: [] }, { userToken: [] })
-    : authMode === "bearerAuth"
-    ? withSecurity(getDlqRoute, { bearerAuth: [] })
-    : getDlqRoute;
-
-  router.openapi(dlqRouteDef, async (c) => {
+  router.openapi(applyRouteSecurity(getDlqRoute), async (c) => {
     const { queue: queueName } = c.req.valid("param");
     if (!isQueueAllowed(queueName)) {
       return c.json({ error: "Queue not allowed" }, 403);
@@ -198,20 +298,7 @@ export const createJobsRouter = (config: JobsConfig) => {
       dlqQueue.getWaitingCount(),
     ]);
 
-    const result = await Promise.all(jobs.map(async (job) => {
-      const state = await job.getState();
-      return {
-        id: job.id!,
-        state,
-        progress: job.progress as number | Record<string, unknown>,
-        result: job.returnvalue,
-        failedReason: job.failedReason ?? undefined,
-        attemptsMade: job.attemptsMade,
-        timestamp: job.timestamp,
-        finishedOn: job.finishedOn ?? undefined,
-      };
-    }));
-
+    const result = await Promise.all(jobs.map(jobToResponse));
     return c.json({ jobs: result, total }, 200);
   });
 

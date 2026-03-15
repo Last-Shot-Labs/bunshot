@@ -92,7 +92,7 @@ This is a **Bun + Hono API framework library** that consuming projects install a
 - `auth.ts` — `/auth/register`, `/auth/login`, `/auth/logout`, `/auth/set-password`, `/auth/me`, `DELETE /auth/me` (account deletion), `/auth/sessions` (GET list + DELETE by sessionId), `/auth/verify-email`, `/auth/resend-verification`, `/auth/forgot-password` (when `passwordReset` configured), `/auth/reset-password` (when `passwordReset` configured), `POST /auth/refresh` (when `refreshTokens` configured), `POST /auth/cancel-deletion` (when queued deletion configured)
 - `oauth.ts` — OAuth initiation (`GET /auth/{provider}`), callbacks, link (`GET /auth/{provider}/link`), and unlink (`DELETE /auth/{provider}/link`) handlers
 - `mfa.ts` — MFA routes (when `auth.mfa` configured): `POST /auth/mfa/setup`, `POST /auth/mfa/verify-setup`, `POST /auth/mfa/verify`, `DELETE /auth/mfa`, `POST /auth/mfa/recovery-codes`
-- `jobs.ts` — Job status routes (when `jobs.statusEndpoint` is true): `GET /jobs/:queue/:id`, `GET /jobs/:queue/:id/logs`, `GET /jobs/:queue/dead-letters`
+- `jobs.ts` — Job status routes (when `jobs.statusEndpoint` is true): `GET /jobs` (list queues), `GET /jobs/:queue` (list jobs), `GET /jobs/:queue/:id`, `GET /jobs/:queue/:id/logs`, `GET /jobs/:queue/dead-letters`
 - `health.ts` — Health check
 - `home.ts` — Root endpoint
 
