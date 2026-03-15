@@ -1,6 +1,7 @@
 import { getRedis } from "./redis";
 import { appConnection, mongoose } from "./mongo";
 import { getAppName, getTokenExpiry } from "./appConfig";
+import { sha256 } from "./crypto";
 import {
   sqliteCreateVerificationToken,
   sqliteGetVerificationToken,
@@ -50,14 +51,17 @@ export const setEmailVerificationStore = (store: VerificationStore) => { _store 
 // Public API
 // ---------------------------------------------------------------------------
 
+/** Create a verification token. Returns the raw token (for the email link).
+ *  Only the SHA-256 hash is persisted in the store. */
 export const createVerificationToken = async (userId: string, email: string): Promise<string> => {
   const token = crypto.randomUUID();
+  const hash = sha256(token);
   const ttl = getTokenExpiry();
-  if (_store === "memory") { memoryCreateVerificationToken(token, userId, email, ttl); return token; }
-  if (_store === "sqlite") { sqliteCreateVerificationToken(token, userId, email, ttl); return token; }
+  if (_store === "memory") { memoryCreateVerificationToken(hash, userId, email, ttl); return token; }
+  if (_store === "sqlite") { sqliteCreateVerificationToken(hash, userId, email, ttl); return token; }
   if (_store === "mongo") {
     await getVerificationModel().create({
-      token,
+      token: hash,
       userId,
       email,
       expiresAt: new Date(Date.now() + ttl * 1000),
@@ -65,7 +69,7 @@ export const createVerificationToken = async (userId: string, email: string): Pr
     return token;
   }
   await getRedis().set(
-    `verify:${getAppName()}:${token}`,
+    `verify:${getAppName()}:${hash}`,
     JSON.stringify({ userId, email }),
     "EX",
     ttl
@@ -73,27 +77,31 @@ export const createVerificationToken = async (userId: string, email: string): Pr
   return token;
 };
 
+/** Look up a verification token by its raw value. Hashes before lookup. */
 export const getVerificationToken = async (token: string): Promise<{ userId: string; email: string } | null> => {
-  if (_store === "memory") return memoryGetVerificationToken(token);
-  if (_store === "sqlite") return sqliteGetVerificationToken(token);
+  const hash = sha256(token);
+  if (_store === "memory") return memoryGetVerificationToken(hash);
+  if (_store === "sqlite") return sqliteGetVerificationToken(hash);
   if (_store === "mongo") {
     const doc = await getVerificationModel()
-      .findOne({ token, expiresAt: { $gt: new Date() } })
+      .findOne({ token: hash, expiresAt: { $gt: new Date() } })
       .lean();
     if (!doc) return null;
     return { userId: doc.userId, email: doc.email };
   }
-  const raw = await getRedis().get(`verify:${getAppName()}:${token}`);
+  const raw = await getRedis().get(`verify:${getAppName()}:${hash}`);
   if (!raw) return null;
   return JSON.parse(raw) as { userId: string; email: string };
 };
 
+/** Delete a verification token by its raw value. Hashes before lookup. */
 export const deleteVerificationToken = async (token: string): Promise<void> => {
-  if (_store === "memory") { memoryDeleteVerificationToken(token); return; }
-  if (_store === "sqlite") { sqliteDeleteVerificationToken(token); return; }
+  const hash = sha256(token);
+  if (_store === "memory") { memoryDeleteVerificationToken(hash); return; }
+  if (_store === "sqlite") { sqliteDeleteVerificationToken(hash); return; }
   if (_store === "mongo") {
-    await getVerificationModel().deleteOne({ token });
+    await getVerificationModel().deleteOne({ token: hash });
     return;
   }
-  await getRedis().del(`verify:${getAppName()}:${token}`);
+  await getRedis().del(`verify:${getAppName()}:${hash}`);
 };

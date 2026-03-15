@@ -11,11 +11,7 @@ async function getOtpAuth() {
   return _otpauth;
 }
 
-function sha256(input: string): string {
-  const hash = new Bun.CryptoHasher("sha256");
-  hash.update(input);
-  return hash.digest("hex");
-}
+import { sha256, timingSafeEqual } from "@lib/crypto";
 
 function generateRandomCode(length: number): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no ambiguous chars: I/1/O/0
@@ -137,7 +133,7 @@ export const verifyRecoveryCode = async (userId: string, code: string): Promise<
   const hashedCodes = await adapter.getRecoveryCodes(userId);
   const hashedInput = sha256(code.toUpperCase());
 
-  const match = hashedCodes.find((h) => h === hashedInput);
+  const match = hashedCodes.find((h) => timingSafeEqual(h, hashedInput));
   if (!match) return false;
 
   await adapter.removeRecoveryCode(userId, match);
@@ -192,7 +188,7 @@ export const generateEmailOtpCode = (length?: number): { code: string; hash: str
 
 /** Verify an email OTP code against a stored hash. */
 export const verifyEmailOtp = (emailOtpHash: string, code: string): boolean => {
-  return sha256(code) === emailOtpHash;
+  return timingSafeEqual(sha256(code), emailOtpHash);
 };
 
 /**

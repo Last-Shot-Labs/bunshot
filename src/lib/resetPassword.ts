@@ -1,4 +1,3 @@
-import { createHash } from "crypto";
 import { getRedis } from "./redis";
 import { appConnection } from "./mongo";
 import { getAppName, getResetTokenExpiry } from "./appConfig";
@@ -11,14 +10,7 @@ import {
   memoryCreateResetToken,
   memoryConsumeResetToken,
 } from "../adapters/memoryAuth";
-
-// ---------------------------------------------------------------------------
-// Token hashing — store SHA-256(token); raw token is only in the email link.
-// If the store is ever leaked, outstanding tokens cannot be replayed directly.
-// ---------------------------------------------------------------------------
-
-const hashToken = (token: string): string =>
-  createHash("sha256").update(token).digest("hex");
+import { sha256 as hashToken } from "./crypto";
 
 // ---------------------------------------------------------------------------
 // Mongo model

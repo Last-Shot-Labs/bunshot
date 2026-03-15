@@ -14,9 +14,11 @@ import { getAuthAdapter } from "@lib/authAdapter";
 import { HttpError } from "@lib/HttpError";
 import { signToken } from "@lib/jwt";
 import { createSession, getActiveSessionCount, evictOldestSession, setRefreshToken } from "@lib/session";
+import { storeOAuthCode, consumeOAuthCode } from "@lib/oauthCode";
 import { COOKIE_TOKEN, COOKIE_REFRESH_TOKEN } from "@lib/constants";
 import { userAuth } from "@middleware/userAuth";
 import { getDefaultRole, getMaxSessions, getRefreshTokenConfig, getAccessTokenExpiry, getRefreshTokenExpiry } from "@lib/appConfig";
+import { trackAttempt } from "@lib/authRateLimit";
 
 const isProd = process.env.NODE_ENV === "production";
 
@@ -68,27 +70,32 @@ const finishOAuth = async (
     await evictOldestSession(user.id);
   }
   await createSession(user.id, token, sessionId, metadata);
-  setCookie(c, COOKIE_TOKEN, token, cookieOptions(rtConfig ? getAccessTokenExpiry() : undefined));
 
   let refreshTokenValue: string | undefined;
   if (rtConfig) {
     refreshTokenValue = crypto.randomUUID();
     await setRefreshToken(sessionId, refreshTokenValue);
-    setCookie(c, COOKIE_REFRESH_TOKEN, refreshTokenValue, cookieOptions(getRefreshTokenExpiry()));
   }
 
-  // Append token to redirect so non-browser clients (mobile deep links) can extract it.
-  // Browser apps can safely ignore the query param.
+  // Store a one-time authorization code instead of exposing the token in the redirect URL.
+  // The client exchanges this code via POST /auth/oauth/exchange to get the session token.
+  const code = await storeOAuthCode({
+    token,
+    userId: user.id,
+    email: profile.email,
+    refreshToken: refreshTokenValue,
+  });
+
   try {
     const url = new URL(postLoginRedirect);
-    url.searchParams.set("token", token);
+    url.searchParams.set("code", code);
     if (profile.email) url.searchParams.set("user", profile.email);
     return c.redirect(url.toString());
   } catch {
     // Relative path fallback
     const sep = postLoginRedirect.includes("?") ? "&" : "?";
     const userParam = profile.email ? `&user=${encodeURIComponent(profile.email)}` : "";
-    return c.redirect(`${postLoginRedirect}${sep}token=${token}${userParam}`);
+    return c.redirect(`${postLoginRedirect}${sep}code=${code}${userParam}`);
   }
 };
 
@@ -295,6 +302,75 @@ export const createOAuthRouter = (providers: string[], postLoginRedirect: string
       }
     );
   }
+
+  // ─── Code Exchange ─────────────────────────────────────────────────────
+  router.openapi(
+    createRoute({
+      method: "post",
+      path: "/auth/oauth/exchange",
+      summary: "Exchange OAuth authorization code for session token",
+      description: "Exchanges a one-time authorization code (received from the OAuth redirect) for a session token. The code is single-use and expires after 60 seconds. Sets session cookies for browser clients; returns the token in the JSON response for mobile/SPA clients.",
+      tags,
+      request: {
+        body: {
+          content: {
+            "application/json": {
+              schema: z.object({
+                code: z.string().describe("One-time authorization code from the OAuth redirect."),
+              }),
+            },
+          },
+        },
+      },
+      responses: {
+        200: {
+          content: {
+            "application/json": {
+              schema: z.object({
+                token: z.string().describe("Session JWT."),
+                userId: z.string().describe("Authenticated user ID."),
+                email: z.string().optional().describe("User email if available."),
+                refreshToken: z.string().optional().describe("Refresh token if refresh tokens are configured."),
+              }),
+            },
+          },
+          description: "Session token and user info.",
+        },
+        400: { content: { "application/json": { schema: OAuthErrorResponse } }, description: "Missing code parameter." },
+        401: { content: { "application/json": { schema: OAuthErrorResponse } }, description: "Invalid, expired, or already-used code." },
+        429: { content: { "application/json": { schema: OAuthErrorResponse } }, description: "Rate limit exceeded." },
+      },
+    }),
+    async (c) => {
+      // Rate limit by IP to prevent brute-forcing codes within the 60s TTL
+      const xff = c.req.header("x-forwarded-for");
+      const ip = (xff ? xff.split(",")[0]?.trim() : undefined) ?? c.req.header("x-real-ip") ?? "unknown";
+      const limited = await trackAttempt(`oauth-exchange:ip:${ip}`, { max: 20, windowMs: 60_000 });
+      if (limited) {
+        return c.json({ error: "Too many requests" }, 429);
+      }
+
+      const { code } = c.req.valid("json");
+      if (!code) return c.json({ error: "Missing code" }, 400);
+
+      const payload = await consumeOAuthCode(code);
+      if (!payload) return c.json({ error: "Invalid or expired code" }, 401);
+
+      // Set session cookies for browser clients
+      const rtConfig = getRefreshTokenConfig();
+      setCookie(c, COOKIE_TOKEN, payload.token, cookieOptions(rtConfig ? getAccessTokenExpiry() : undefined));
+      if (payload.refreshToken && rtConfig) {
+        setCookie(c, COOKIE_REFRESH_TOKEN, payload.refreshToken, cookieOptions(getRefreshTokenExpiry()));
+      }
+
+      return c.json({
+        token: payload.token,
+        userId: payload.userId,
+        email: payload.email,
+        refreshToken: payload.refreshToken,
+      }, 200);
+    }
+  );
 
   return router;
 };

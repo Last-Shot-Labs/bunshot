@@ -10,8 +10,8 @@ import { bearerAuth } from "@middleware/bearerAuth";
 import { identify } from "@middleware/identify";
 import type { AppEnv } from "@lib/context";
 import { HEADER_USER_TOKEN, HEADER_REFRESH_TOKEN } from "@lib/constants";
-import { setAppName, setAppRoles, setDefaultRole, setPrimaryField, setEmailVerificationConfig, setPasswordResetConfig, setMaxSessions, setPersistSessionMetadata, setIncludeInactiveSessions, setTrackLastActive, setRefreshTokenConfig, setMfaConfig } from "@lib/appConfig";
-import type { PrimaryField, EmailVerificationConfig, PasswordResetConfig, RefreshTokenConfig, MfaConfig, MfaEmailOtpConfig, MfaWebAuthnConfig } from "@lib/appConfig";
+import { setAppName, setAppRoles, setDefaultRole, setPrimaryField, setEmailVerificationConfig, setPasswordResetConfig, setPasswordPolicy, setMaxSessions, setPersistSessionMetadata, setIncludeInactiveSessions, setTrackLastActive, setRefreshTokenConfig, setMfaConfig } from "@lib/appConfig";
+import type { PrimaryField, EmailVerificationConfig, PasswordResetConfig, PasswordPolicyConfig, RefreshTokenConfig, MfaConfig, MfaEmailOtpConfig, MfaWebAuthnConfig } from "@lib/appConfig";
 import { setEmailVerificationStore } from "@lib/emailVerification";
 import { setPasswordResetStore } from "@lib/resetPassword";
 import { setAuthRateLimitStore } from "@lib/authRateLimit";
@@ -20,6 +20,7 @@ import { mongoAuthAdapter } from "./adapters/mongoAuth";
 import type { AuthAdapter } from "@lib/authAdapter";
 import { memoryAuthAdapter } from "./adapters/memoryAuth";
 import { initOAuthProviders, getConfiguredOAuthProviders, setOAuthStateStore } from "@lib/oauth";
+import { setOAuthCodeStore } from "@lib/oauthCode";
 import type { OAuthProviderConfig } from "@lib/oauth";
 import { createOAuthRouter } from "@routes/oauth";
 import { connectMongo, connectAuthMongo, connectAppMongo } from "@lib/mongo";
@@ -87,6 +88,9 @@ export interface OAuthConfig {
   providers?: OAuthProviderConfig;
   /** Where to redirect after a successful OAuth login. Defaults to "/" */
   postRedirect?: string;
+  /** Allowlist of redirect URLs. If set, the postRedirect URL is validated against this list.
+   *  Relative paths (e.g., "/") are always allowed. Only absolute URLs are validated. */
+  allowedRedirectUrls?: string[];
 }
 
 export interface AuthRateLimitConfig {
@@ -145,6 +149,10 @@ export interface AuthConfig {
    * Mounts POST /auth/forgot-password and POST /auth/reset-password.
    */
   passwordReset?: PasswordResetConfig;
+  /** Password strength policy for registration and reset-password.
+   *  Login is intentionally lenient (min 1) so users under older policies can still sign in.
+   *  Defaults: minLength=8, requireLetter=true, requireDigit=true, requireSpecial=false. */
+  passwordPolicy?: PasswordPolicyConfig;
   /** Rate limit configuration for built-in auth endpoints. */
   rateLimit?: AuthRateLimitConfig;
   /** Session concurrency and metadata persistence policy. */
@@ -219,6 +227,12 @@ export interface BotProtectionConfig {
 export interface SecurityConfig {
   /** CORS origins. Defaults to "*" */
   cors?: string | string[];
+  /** Additional security headers to set via Hono's secureHeaders middleware.
+   *  Pass a Content-Security-Policy, Permissions-Policy, etc. */
+  headers?: {
+    contentSecurityPolicy?: string;
+    permissionsPolicy?: string;
+  };
   /** Global rate limit. Defaults to 100 req / 60s */
   rateLimit?: { windowMs: number; max: number };
   /**
@@ -341,6 +355,9 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
   const openApiVersion = appConfig.version ?? "1.0.0";
 
   const corsOrigins = securityConfig.cors ?? "*";
+  if (corsOrigins === "*" && process.env.NODE_ENV === "production") {
+    console.warn("[security] CORS is set to wildcard (*) in production. Configure security.cors with specific origins to restrict cross-origin access.");
+  }
   const rlConfig = securityConfig.rateLimit ?? { windowMs: 60_000, max: 100 };
   const botCfg = securityConfig.botProtection ?? {};
   const enableBearerAuth = securityConfig.bearerAuth !== false;
@@ -353,6 +370,22 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
   const explicitAuthAdapter = authConfig.adapter;
   const oauthProviders = authConfig.oauth?.providers;
   const postOAuthRedirect = authConfig.oauth?.postRedirect ?? "/";
+  const allowedRedirectUrls = authConfig.oauth?.allowedRedirectUrls;
+  // Validate postRedirect against allowlist at startup (not per-request)
+  if (allowedRedirectUrls && postOAuthRedirect !== "/") {
+    try {
+      const redirectUrl = new URL(postOAuthRedirect);
+      const allowed = allowedRedirectUrls.some((u) => {
+        try { return new URL(u).origin === redirectUrl.origin; } catch { return false; }
+      });
+      if (!allowed) {
+        throw new Error(`createApp: oauth.postRedirect "${postOAuthRedirect}" is not in the allowedRedirectUrls list. Add its origin to oauth.allowedRedirectUrls.`);
+      }
+    } catch (e) {
+      if (e instanceof Error && e.message.startsWith("createApp:")) throw e;
+      // Relative path — always allowed
+    }
+  }
   const roles = authConfig.roles ?? [];
   const defaultRole = authConfig.defaultRole;
   const primaryField = authConfig.primaryField ?? "email";
@@ -384,6 +417,7 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
 
   setSessionStore(sessions);
   setOAuthStateStore(oauthState);
+  setOAuthCodeStore(oauthState);
   setCacheStore(cache);
 
   if (mongo === "single") await connectMongo();
@@ -427,6 +461,7 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
   setEmailVerificationConfig(emailVerification ?? null);
   setEmailVerificationStore(sessions);
   setPasswordResetConfig(passwordReset ?? null);
+  if (authConfig.passwordPolicy) setPasswordPolicy(authConfig.passwordPolicy);
   setPasswordResetStore(sessions);
   setAuthRateLimitStore(authRateLimit?.store ?? (enableRedis ? "redis" : "memory"));
   setMaxSessions(sessionPolicy.maxSessions ?? 6);
@@ -453,7 +488,22 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
   const app = new OpenAPIHono<AppEnv>();
 
   app.use(logger());
+  const headerOpts: Record<string, string> = {};
+  if (securityConfig.headers?.contentSecurityPolicy) {
+    headerOpts["Content-Security-Policy"] = securityConfig.headers.contentSecurityPolicy;
+  }
+  if (securityConfig.headers?.permissionsPolicy) {
+    headerOpts["Permissions-Policy"] = securityConfig.headers.permissionsPolicy;
+  }
   app.use(secureHeaders());
+  if (Object.keys(headerOpts).length > 0) {
+    app.use(async (c, next) => {
+      await next();
+      for (const [k, v] of Object.entries(headerOpts)) {
+        c.res.headers.set(k, v);
+      }
+    });
+  }
   app.use(cors({ origin: corsOrigins, allowHeaders: ["Content-Type", "Authorization", HEADER_USER_TOKEN, HEADER_REFRESH_TOKEN], exposeHeaders: ["x-cache"], credentials: true }));
   if ((botCfg.blockList?.length ?? 0) > 0) {
     const { botProtection } = await import("@middleware/botProtection");

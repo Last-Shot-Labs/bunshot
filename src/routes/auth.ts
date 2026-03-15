@@ -2,7 +2,7 @@ import { createRoute, withSecurity } from "@lib/createRoute";
 import { z } from "zod";
 import { setCookie, getCookie, deleteCookie } from "hono/cookie";
 import * as AuthService from "@services/auth";
-import { makeRegisterSchema, makeLoginSchema } from "@schemas/auth";
+import { makeRegisterSchema, makeLoginSchema, resetPasswordSchema } from "@schemas/auth";
 import { COOKIE_TOKEN, HEADER_USER_TOKEN, COOKIE_REFRESH_TOKEN, HEADER_REFRESH_TOKEN } from "@lib/constants";
 import { userAuth } from "@middleware/userAuth";
 import { isLimited, trackAttempt, bustAuthLimit } from "@lib/authRateLimit";
@@ -438,7 +438,7 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
               "application/json": {
                 schema: z.object({
                   token: z.string().describe("Single-use reset token received via email."),
-                  password: z.string().min(8).describe("New password. Minimum 8 characters."),
+                  password: resetPasswordSchema().describe("New password."),
                 }),
               },
             },
@@ -511,6 +511,10 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
         },
       }),
       async (c) => {
+        const ip = clientIp(c.req.header("x-forwarded-for"), c.req.header("x-real-ip")) ?? "unknown";
+        if (await trackAttempt(`refresh:ip:${ip}`, { max: 30, windowMs: 60_000 })) {
+          return c.json({ error: "Too many refresh attempts. Try again later." }, 429);
+        }
         const body = c.req.valid("json");
         const rt = body.refreshToken ?? getCookie(c, COOKIE_REFRESH_TOKEN) ?? c.req.header(HEADER_REFRESH_TOKEN) ?? null;
         if (!rt) {

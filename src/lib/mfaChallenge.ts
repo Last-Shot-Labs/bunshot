@@ -1,6 +1,7 @@
 import { getRedis } from "./redis";
 import { appConnection, mongoose } from "./mongo";
 import { getAppName, getMfaChallengeTtl } from "./appConfig";
+import { sha256 } from "./crypto";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -119,6 +120,7 @@ export const setMfaChallengeStore = (store: MfaChallengeStore) => { _store = sto
 
 export const createMfaChallenge = async (userId: string, options?: MfaChallengeOptions): Promise<string> => {
   const token = crypto.randomUUID();
+  const hash = sha256(token);
   const ttl = getMfaChallengeTtl();
   const now = Date.now();
   const purpose: MfaChallengePurpose = "login";
@@ -126,7 +128,7 @@ export const createMfaChallenge = async (userId: string, options?: MfaChallengeO
   const webauthnChallenge = options?.webauthnChallenge;
 
   if (_store === "memory") {
-    _memoryChallenges.set(token, { userId, purpose, emailOtpHash, webauthnChallenge, createdAt: now, resendCount: 0, expiresAt: now + ttl * 1000 });
+    _memoryChallenges.set(hash, { userId, purpose, emailOtpHash, webauthnChallenge, createdAt: now, resendCount: 0, expiresAt: now + ttl * 1000 });
     return token;
   }
 
@@ -134,14 +136,14 @@ export const createMfaChallenge = async (userId: string, options?: MfaChallengeO
     ensureSqliteMfaTable();
     _sqliteDb.run(
       "INSERT INTO mfa_challenges (token, userId, purpose, emailOtpHash, webauthnChallenge, createdAt, resendCount, expiresAt) VALUES (?, ?, ?, ?, ?, ?, 0, ?)",
-      [token, userId, purpose, emailOtpHash ?? null, webauthnChallenge ?? null, now, now + ttl * 1000]
+      [hash, userId, purpose, emailOtpHash ?? null, webauthnChallenge ?? null, now, now + ttl * 1000]
     );
     return token;
   }
 
   if (_store === "mongo") {
     await getMfaChallengeModel().create({
-      token,
+      token: hash,
       userId,
       purpose,
       emailOtpHash,
@@ -155,7 +157,7 @@ export const createMfaChallenge = async (userId: string, options?: MfaChallengeO
 
   // redis
   await getRedis().set(
-    `mfachallenge:${getAppName()}:${token}`,
+    `mfachallenge:${getAppName()}:${hash}`,
     JSON.stringify({ userId, purpose, emailOtpHash, webauthnChallenge, createdAt: now, resendCount: 0 }),
     "EX",
     ttl
@@ -164,13 +166,15 @@ export const createMfaChallenge = async (userId: string, options?: MfaChallengeO
 };
 
 export const consumeMfaChallenge = async (token: string): Promise<MfaChallengeData | null> => {
+  const hash = sha256(token);
+
   if (_store === "memory") {
-    const entry = _memoryChallenges.get(token);
+    const entry = _memoryChallenges.get(hash);
     if (!entry || entry.expiresAt <= Date.now()) {
-      _memoryChallenges.delete(token);
+      _memoryChallenges.delete(hash);
       return null;
     }
-    _memoryChallenges.delete(token);
+    _memoryChallenges.delete(hash);
     if (entry.purpose !== "login") return null;
     return { userId: entry.userId, purpose: entry.purpose, emailOtpHash: entry.emailOtpHash, webauthnChallenge: entry.webauthnChallenge };
   }
@@ -179,19 +183,19 @@ export const consumeMfaChallenge = async (token: string): Promise<MfaChallengeDa
     ensureSqliteMfaTable();
     const row = _sqliteDb.query(
       "DELETE FROM mfa_challenges WHERE token = ? AND expiresAt > ? RETURNING userId, purpose, emailOtpHash, webauthnChallenge"
-    ).get(token, Date.now()) as { userId: string; purpose: string; emailOtpHash: string | null; webauthnChallenge: string | null } | null;
+    ).get(hash, Date.now()) as { userId: string; purpose: string; emailOtpHash: string | null; webauthnChallenge: string | null } | null;
     if (!row || row.purpose !== "login") return null;
     return { userId: row.userId, purpose: "login", emailOtpHash: row.emailOtpHash ?? undefined, webauthnChallenge: row.webauthnChallenge ?? undefined };
   }
 
   if (_store === "mongo") {
-    const doc = await getMfaChallengeModel().findOneAndDelete({ token, expiresAt: { $gt: new Date() } });
+    const doc = await getMfaChallengeModel().findOneAndDelete({ token: hash, expiresAt: { $gt: new Date() } });
     if (!doc || doc.purpose !== "login") return null;
     return { userId: doc.userId, purpose: "login", emailOtpHash: doc.emailOtpHash, webauthnChallenge: doc.webauthnChallenge };
   }
 
   // redis
-  const key = `mfachallenge:${getAppName()}:${token}`;
+  const key = `mfachallenge:${getAppName()}:${hash}`;
   const raw = await getRedis().get(key);
   if (!raw) return null;
   await getRedis().del(key);
@@ -209,12 +213,13 @@ export const replaceMfaChallengeOtp = async (
   token: string,
   newEmailOtpHash: string
 ): Promise<{ userId: string; resendCount: number } | null> => {
+  const hash = sha256(token);
   const ttl = getMfaChallengeTtl();
 
   if (_store === "memory") {
-    const entry = _memoryChallenges.get(token);
+    const entry = _memoryChallenges.get(hash);
     if (!entry || entry.expiresAt <= Date.now()) {
-      _memoryChallenges.delete(token);
+      _memoryChallenges.delete(hash);
       return null;
     }
     if (entry.resendCount >= MAX_RESENDS) return null;
@@ -231,20 +236,20 @@ export const replaceMfaChallengeOtp = async (
     const now = Date.now();
     const existing = _sqliteDb.query(
       "SELECT createdAt, resendCount FROM mfa_challenges WHERE token = ? AND expiresAt > ?"
-    ).get(token, now) as { createdAt: number; resendCount: number } | null;
+    ).get(hash, now) as { createdAt: number; resendCount: number } | null;
     if (!existing || existing.resendCount >= MAX_RESENDS) return null;
     const newExpiry = Math.min(now + ttl * 1000, existing.createdAt + ttl * 3 * 1000);
     const newCount = existing.resendCount + 1;
     const row = _sqliteDb.query(
       "UPDATE mfa_challenges SET emailOtpHash = ?, resendCount = ?, expiresAt = ? WHERE token = ? RETURNING userId"
-    ).get(newEmailOtpHash, newCount, newExpiry, token) as { userId: string } | null;
+    ).get(newEmailOtpHash, newCount, newExpiry, hash) as { userId: string } | null;
     return row ? { userId: row.userId, resendCount: newCount } : null;
   }
 
   if (_store === "mongo") {
     const now = new Date();
     const doc = await getMfaChallengeModel().findOneAndUpdate(
-      { token, expiresAt: { $gt: now }, resendCount: { $lt: MAX_RESENDS } },
+      { token: hash, expiresAt: { $gt: now }, resendCount: { $lt: MAX_RESENDS } },
       [
         {
           $set: {
@@ -265,7 +270,7 @@ export const replaceMfaChallengeOtp = async (
   }
 
   // redis
-  const key = `mfachallenge:${getAppName()}:${token}`;
+  const key = `mfachallenge:${getAppName()}:${hash}`;
   const raw = await getRedis().get(key);
   if (!raw) return null;
   const data = JSON.parse(raw) as MfaChallengeRecord;
@@ -290,12 +295,13 @@ export const replaceMfaChallengeOtp = async (
  */
 export const createWebAuthnRegistrationChallenge = async (userId: string, challenge: string): Promise<string> => {
   const token = crypto.randomUUID();
+  const hash = sha256(token);
   const ttl = getMfaChallengeTtl();
   const now = Date.now();
   const purpose: MfaChallengePurpose = "webauthn-registration";
 
   if (_store === "memory") {
-    _memoryChallenges.set(token, { userId, purpose, webauthnChallenge: challenge, createdAt: now, resendCount: 0, expiresAt: now + ttl * 1000 });
+    _memoryChallenges.set(hash, { userId, purpose, webauthnChallenge: challenge, createdAt: now, resendCount: 0, expiresAt: now + ttl * 1000 });
     return token;
   }
 
@@ -303,14 +309,14 @@ export const createWebAuthnRegistrationChallenge = async (userId: string, challe
     ensureSqliteMfaTable();
     _sqliteDb.run(
       "INSERT INTO mfa_challenges (token, userId, purpose, webauthnChallenge, createdAt, resendCount, expiresAt) VALUES (?, ?, ?, ?, ?, 0, ?)",
-      [token, userId, purpose, challenge, now, now + ttl * 1000]
+      [hash, userId, purpose, challenge, now, now + ttl * 1000]
     );
     return token;
   }
 
   if (_store === "mongo") {
     await getMfaChallengeModel().create({
-      token,
+      token: hash,
       userId,
       purpose,
       webauthnChallenge: challenge,
@@ -323,7 +329,7 @@ export const createWebAuthnRegistrationChallenge = async (userId: string, challe
 
   // redis
   await getRedis().set(
-    `mfachallenge:${getAppName()}:${token}`,
+    `mfachallenge:${getAppName()}:${hash}`,
     JSON.stringify({ userId, purpose, webauthnChallenge: challenge, createdAt: now, resendCount: 0 }),
     "EX",
     ttl
@@ -336,13 +342,15 @@ export const createWebAuthnRegistrationChallenge = async (userId: string, challe
  * Only accepts tokens with `purpose: "webauthn-registration"`.
  */
 export const consumeWebAuthnRegistrationChallenge = async (token: string): Promise<{ userId: string; challenge: string } | null> => {
+  const hash = sha256(token);
+
   if (_store === "memory") {
-    const entry = _memoryChallenges.get(token);
+    const entry = _memoryChallenges.get(hash);
     if (!entry || entry.expiresAt <= Date.now()) {
-      _memoryChallenges.delete(token);
+      _memoryChallenges.delete(hash);
       return null;
     }
-    _memoryChallenges.delete(token);
+    _memoryChallenges.delete(hash);
     if (entry.purpose !== "webauthn-registration" || !entry.webauthnChallenge) return null;
     return { userId: entry.userId, challenge: entry.webauthnChallenge };
   }
@@ -351,19 +359,19 @@ export const consumeWebAuthnRegistrationChallenge = async (token: string): Promi
     ensureSqliteMfaTable();
     const row = _sqliteDb.query(
       "DELETE FROM mfa_challenges WHERE token = ? AND expiresAt > ? RETURNING userId, purpose, webauthnChallenge"
-    ).get(token, Date.now()) as { userId: string; purpose: string; webauthnChallenge: string | null } | null;
+    ).get(hash, Date.now()) as { userId: string; purpose: string; webauthnChallenge: string | null } | null;
     if (!row || row.purpose !== "webauthn-registration" || !row.webauthnChallenge) return null;
     return { userId: row.userId, challenge: row.webauthnChallenge };
   }
 
   if (_store === "mongo") {
-    const doc = await getMfaChallengeModel().findOneAndDelete({ token, expiresAt: { $gt: new Date() } });
+    const doc = await getMfaChallengeModel().findOneAndDelete({ token: hash, expiresAt: { $gt: new Date() } });
     if (!doc || doc.purpose !== "webauthn-registration" || !doc.webauthnChallenge) return null;
     return { userId: doc.userId, challenge: doc.webauthnChallenge };
   }
 
   // redis
-  const key = `mfachallenge:${getAppName()}:${token}`;
+  const key = `mfachallenge:${getAppName()}:${hash}`;
   const raw = await getRedis().get(key);
   if (!raw) return null;
   await getRedis().del(key);

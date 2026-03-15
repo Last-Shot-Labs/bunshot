@@ -16,12 +16,24 @@ export interface PasswordResetConfig {
   onSend: (email: string, token: string) => Promise<void>;
 }
 
+export interface PasswordPolicyConfig {
+  /** Minimum password length. Defaults to 8. */
+  minLength?: number;
+  /** Require at least one letter (a–z or A–Z). Defaults to true. */
+  requireLetter?: boolean;
+  /** Require at least one digit (0–9). Defaults to true. */
+  requireDigit?: boolean;
+  /** Require at least one special character. Defaults to false. */
+  requireSpecial?: boolean;
+}
+
 let appName = "Core API";
 let appRoles: string[] = [];
 let defaultRole: string | null = null;
 let _primaryField: PrimaryField = "email";
 let _emailVerificationConfig: EmailVerificationConfig | null = null;
 let _passwordResetConfig: PasswordResetConfig | null = null;
+let _passwordPolicy: PasswordPolicyConfig = {};
 
 export const setAppName = (name: string) => { appName = name; };
 export const getAppName = () => appName;
@@ -43,6 +55,9 @@ export const getTokenExpiry = (): number => _emailVerificationConfig?.tokenExpir
 
 export const setPasswordResetConfig = (config: PasswordResetConfig | null) => { _passwordResetConfig = config; };
 export const getPasswordResetConfig = () => _passwordResetConfig;
+
+export const setPasswordPolicy = (config: PasswordPolicyConfig) => { _passwordPolicy = config; };
+export const getPasswordPolicy = () => _passwordPolicy;
 
 const DEFAULT_RESET_TOKEN_EXPIRY = 60 * 60; // 1 hour
 export const getResetTokenExpiry = (): number => _passwordResetConfig?.tokenExpiry ?? DEFAULT_RESET_TOKEN_EXPIRY;

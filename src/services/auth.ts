@@ -69,11 +69,17 @@ export const register = async (identifier: string, password: string, metadata?: 
   return { token, userId: user.id, email: identifier, refreshToken };
 };
 
+// Pre-computed dummy hash so non-existent-user login takes the same time as wrong-password login
+const DUMMY_HASH = await Bun.password.hash("dummy-timing-safe-placeholder");
+
 export const login = async (identifier: string, password: string, metadata?: SessionMetadata): Promise<AuthResult> => {
   const adapter = getAuthAdapter();
   const findFn = adapter.findByIdentifier ?? adapter.findByEmail.bind(adapter);
   const user = await findFn(identifier);
-  if (!user || !(await Bun.password.verify(password, user.passwordHash))) {
+  // Always verify against a hash to prevent timing-based user enumeration
+  const hashToVerify = user?.passwordHash ?? DUMMY_HASH;
+  const passwordValid = await Bun.password.verify(password, hashToVerify);
+  if (!user || !passwordValid) {
     throw new HttpError(401, "Invalid credentials");
   }
 

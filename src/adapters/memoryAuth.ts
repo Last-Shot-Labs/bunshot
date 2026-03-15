@@ -46,6 +46,7 @@ const _oauthStates        = new Map<string, { codeVerifier?: string; linkUserId?
 const _cache              = new Map<string, { value: string; expiresAt?: number }>();
 const _verificationTokens = new Map<string, { userId: string; email: string; expiresAt: number }>();
 const _resetTokens        = new Map<string, { userId: string; email: string; expiresAt: number }>();
+const _oauthCodes         = new Map<string, { token: string; userId: string; email?: string; refreshToken?: string; expiresAt: number }>();
 const _tenantRoles        = new Map<string, string[]>();              // "userId:tenantId" → roles
 
 /** Reset all in-memory state. Useful for test isolation. */
@@ -57,6 +58,7 @@ export const clearMemoryStore = (): void => {
   _refreshTokenIndex.clear();
   _tenantRoles.clear();
   _oauthStates.clear();
+  _oauthCodes.clear();
   _cache.clear();
   _verificationTokens.clear();
   _resetTokens.clear();
@@ -508,4 +510,24 @@ export const memoryConsumeResetToken = (hash: string): { userId: string; email: 
   }
   _resetTokens.delete(hash);
   return { userId: entry.userId, email: entry.email };
+};
+
+// ---------------------------------------------------------------------------
+// OAuth code helpers (used by src/lib/oauthCode.ts)
+// ---------------------------------------------------------------------------
+
+import type { OAuthCodePayload } from "@lib/oauthCode";
+
+export const memoryStoreOAuthCode = (hash: string, payload: OAuthCodePayload, ttlSeconds: number): void => {
+  _oauthCodes.set(hash, { ...payload, expiresAt: Date.now() + ttlSeconds * 1000 });
+};
+
+export const memoryConsumeOAuthCode = (hash: string): OAuthCodePayload | null => {
+  const entry = _oauthCodes.get(hash);
+  if (!entry || entry.expiresAt <= Date.now()) {
+    _oauthCodes.delete(hash);
+    return null;
+  }
+  _oauthCodes.delete(hash);
+  return { token: entry.token, userId: entry.userId, email: entry.email, refreshToken: entry.refreshToken };
 };

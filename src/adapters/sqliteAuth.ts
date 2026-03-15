@@ -98,6 +98,14 @@ function initSchema(db: Database): void {
     createdAt    INTEGER NOT NULL
   )`);
   db.run("CREATE INDEX IF NOT EXISTS idx_webauthn_userId ON webauthn_credentials(userId)");
+  db.run(`CREATE TABLE IF NOT EXISTS oauth_codes (
+    codeHash     TEXT PRIMARY KEY,
+    token        TEXT NOT NULL,
+    userId       TEXT NOT NULL,
+    email        TEXT,
+    refreshToken TEXT,
+    expiresAt    INTEGER NOT NULL
+  )`);
 }
 
 // ---------------------------------------------------------------------------
@@ -580,6 +588,28 @@ export const sqliteConsumeResetToken = (hash: string): { userId: string; email: 
 };
 
 // ---------------------------------------------------------------------------
+// OAuth code helpers (used by src/lib/oauthCode.ts)
+// ---------------------------------------------------------------------------
+
+import type { OAuthCodePayload } from "@lib/oauthCode";
+
+export const sqliteStoreOAuthCode = (hash: string, payload: OAuthCodePayload, ttlSeconds: number): void => {
+  const expiresAt = Date.now() + ttlSeconds * 1000;
+  getDb().run(
+    "INSERT INTO oauth_codes (codeHash, token, userId, email, refreshToken, expiresAt) VALUES (?, ?, ?, ?, ?, ?)",
+    [hash, payload.token, payload.userId, payload.email ?? null, payload.refreshToken ?? null, expiresAt]
+  );
+};
+
+export const sqliteConsumeOAuthCode = (hash: string): OAuthCodePayload | null => {
+  const row = getDb().query<{ token: string; userId: string; email: string | null; refreshToken: string | null }, [string, number]>(
+    "DELETE FROM oauth_codes WHERE codeHash = ? AND expiresAt > ? RETURNING token, userId, email, refreshToken"
+  ).get(hash, Date.now());
+  if (!row) return null;
+  return { token: row.token, userId: row.userId, email: row.email ?? undefined, refreshToken: row.refreshToken ?? undefined };
+};
+
+// ---------------------------------------------------------------------------
 // Optional periodic cleanup of expired rows
 // ---------------------------------------------------------------------------
 
@@ -597,5 +627,6 @@ export const startSqliteCleanup = (intervalMs = 3_600_000): ReturnType<typeof se
     db.run("DELETE FROM cache_entries WHERE expiresAt IS NOT NULL AND expiresAt <= ?", [now]);
     db.run("DELETE FROM email_verifications WHERE expiresAt <= ?", [now]);
     db.run("DELETE FROM password_resets WHERE expiresAt <= ?", [now]);
+    db.run("DELETE FROM oauth_codes WHERE expiresAt <= ?", [now]);
   }, intervalMs);
 };
