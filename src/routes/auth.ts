@@ -11,8 +11,8 @@ import { createRouter } from "@lib/context";
 import { getVerificationToken, deleteVerificationToken, createVerificationToken } from "@lib/emailVerification";
 import { createResetToken, consumeResetToken } from "@lib/resetPassword";
 import type { PrimaryField, EmailVerificationConfig, PasswordResetConfig } from "@lib/appConfig";
-import type { AuthRateLimitConfig } from "../app";
-import { getUserSessions, deleteSession } from "@lib/session";
+import type { AuthRateLimitConfig, AccountDeletionConfig } from "../app";
+import { getUserSessions, deleteSession, deleteUserSessions } from "@lib/session";
 
 const isProd = process.env.NODE_ENV === "production";
 const TokenResponse = z.object({
@@ -41,9 +41,10 @@ export interface AuthRouterOptions {
   emailVerification?: EmailVerificationConfig;
   passwordReset?: PasswordResetConfig;
   rateLimit?: AuthRateLimitConfig;
+  accountDeletion?: AccountDeletionConfig;
 }
 
-export const createAuthRouter = ({ primaryField, emailVerification, passwordReset, rateLimit }: AuthRouterOptions) => {
+export const createAuthRouter = ({ primaryField, emailVerification, passwordReset, rateLimit, accountDeletion }: AuthRouterOptions) => {
   const router = createRouter();
   const RegisterSchema = makeRegisterSchema(primaryField);
   const LoginSchema = makeLoginSchema(primaryField);
@@ -160,6 +161,86 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
       const user = adapter.getUser ? await adapter.getUser(authUserId) : null;
       const googleLinked = user?.providerIds?.some((id) => id.startsWith("google:")) ?? false;
       return c.json({ userId: authUserId, email: user?.email, emailVerified: user?.emailVerified, googleLinked }, 200);
+    }
+  );
+
+  // ---------------------------------------------------------------------------
+  // Account deletion
+  // ---------------------------------------------------------------------------
+
+  const deleteAccountOpts = { windowMs: rateLimit?.deleteAccount?.windowMs ?? 60 * 60 * 1000, max: rateLimit?.deleteAccount?.max ?? 3 };
+
+  router.openapi(
+    withSecurity(createRoute({
+      method: "delete",
+      path: "/auth/me",
+      summary: "Delete account",
+      description: "Permanently deletes the authenticated user's account. Requires password confirmation for credential accounts. MFA is not required — the password serves as the identity check. Revokes all active sessions.",
+      tags,
+      request: {
+        body: {
+          content: {
+            "application/json": {
+              schema: z.object({
+                password: z.string().optional().describe("Current password. Required for credential accounts, optional for OAuth-only accounts."),
+              }),
+            },
+          },
+          description: "Password confirmation.",
+        },
+      },
+      responses: {
+        200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Account deleted." },
+        202: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Account deletion has been scheduled." },
+        400: { content: { "application/json": { schema: ErrorResponse } }, description: "Password is required for credential accounts." },
+        401: { content: { "application/json": { schema: ErrorResponse } }, description: "Invalid password or no valid session." },
+        429: { content: { "application/json": { schema: ErrorResponse } }, description: "Too many deletion attempts. Try again later." },
+        501: { content: { "application/json": { schema: ErrorResponse } }, description: "The configured auth adapter does not support deleteUser." },
+      },
+    }), { cookieAuth: [] }, { userToken: [] }),
+    async (c) => {
+      const authUserId = c.get("authUserId")!;
+      if (await trackAttempt(`deleteaccount:${authUserId}`, deleteAccountOpts)) {
+        return c.json({ error: "Too many deletion attempts. Try again later." }, 429);
+      }
+
+      const adapter = getAuthAdapter();
+      if (!adapter.deleteUser) {
+        return c.json({ error: "Auth adapter does not support deleteUser" }, 501);
+      }
+
+      const { password } = c.req.valid("json");
+
+      // Verify password for credential accounts
+      if (password) {
+        const user = adapter.getUser ? await adapter.getUser(authUserId) : null;
+        const email = user?.email;
+        if (email) {
+          const findFn = adapter.findByIdentifier ?? adapter.findByEmail.bind(adapter);
+          const found = await findFn(email);
+          if (found && !(await Bun.password.verify(password, found.passwordHash))) {
+            return c.json({ error: "Invalid password" }, 401);
+          }
+        }
+      } else if (adapter.hasPassword && await adapter.hasPassword(authUserId)) {
+        return c.json({ error: "Password is required to delete a credential account" }, 400);
+      }
+
+      // Call onBeforeDelete hook
+      if (accountDeletion?.onBeforeDelete) {
+        await accountDeletion.onBeforeDelete(authUserId);
+      }
+
+      // Synchronous deletion (default)
+      await deleteUserSessions(authUserId);
+      await adapter.deleteUser(authUserId);
+
+      if (accountDeletion?.onAfterDelete) {
+        await accountDeletion.onAfterDelete(authUserId);
+      }
+
+      deleteCookie(c, COOKIE_TOKEN, { path: "/" });
+      return c.json({ message: "Account deleted" }, 200);
     }
   );
 

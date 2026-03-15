@@ -340,6 +340,11 @@ export const evictOldestSession = async (userId: string): Promise<void> => {
   if (oldest) await deleteSession(oldest.sessionId);
 };
 
+export const deleteUserSessions = async (userId: string): Promise<void> => {
+  const sessions = await getUserSessions(userId);
+  await Promise.all(sessions.map((s) => deleteSession(s.sessionId)));
+};
+
 export const updateSessionLastActive = async (sessionId: string): Promise<void> => {
   if (_store === "memory") { memoryUpdateSessionLastActive(sessionId); return; }
   if (_store === "sqlite") { sqliteUpdateSessionLastActive(sessionId); return; }

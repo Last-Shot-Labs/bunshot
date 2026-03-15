@@ -1,7 +1,7 @@
 import { getAuthAdapter } from "@lib/authAdapter";
 import { HttpError } from "@lib/HttpError";
 import { signToken, verifyToken } from "@lib/jwt";
-import { createSession, deleteSession, getActiveSessionCount, evictOldestSession } from "@lib/session";
+import { createSession, deleteSession, getActiveSessionCount, evictOldestSession, deleteUserSessions } from "@lib/session";
 import type { SessionMetadata } from "@lib/session";
 import { getDefaultRole, getPrimaryField, getEmailVerificationConfig, getMaxSessions } from "@lib/appConfig";
 import { createVerificationToken } from "@lib/emailVerification";
@@ -62,6 +62,34 @@ export const login = async (identifier: string, password: string, metadata?: Ses
 
   await createSession(user.id, token, sessionId, metadata);
   return { token, userId: user.id, email: fullUser?.email, googleLinked };
+};
+
+export const deleteAccount = async (userId: string, password?: string): Promise<void> => {
+  const adapter = getAuthAdapter();
+  if (!adapter.deleteUser) {
+    throw new HttpError(501, "Auth adapter does not support deleteUser");
+  }
+
+  // Verify password for credential accounts
+  if (password) {
+    const user = adapter.getUser ? await adapter.getUser(userId) : null;
+    const email = user?.email;
+    if (email) {
+      const findFn = adapter.findByIdentifier ?? adapter.findByEmail.bind(adapter);
+      const found = await findFn(email);
+      if (found && !(await Bun.password.verify(password, found.passwordHash))) {
+        throw new HttpError(401, "Invalid password");
+      }
+    }
+  } else if (adapter.hasPassword && await adapter.hasPassword(userId)) {
+    throw new HttpError(400, "Password is required to delete a credential account");
+  }
+
+  // Revoke all sessions
+  await deleteUserSessions(userId);
+
+  // Delete the user
+  await adapter.deleteUser(userId);
 };
 
 export const logout = async (token: string | null) => {

@@ -34,6 +34,10 @@ export interface AuthAdapter {
   setEmailVerified?(userId: string, verified: boolean): Promise<void>;
   /** Optional. Return whether a user's email address has been verified. */
   getEmailVerified?(userId: string): Promise<boolean>;
+  /** Optional. Permanently delete a user account. Used by DELETE /auth/me. */
+  deleteUser?(userId: string): Promise<void>;
+  /** Optional. Check whether a user has a password set (credential account vs OAuth-only). */
+  hasPassword?(userId: string): Promise<boolean>;
 }
 
 let _adapter: AuthAdapter | null = null;

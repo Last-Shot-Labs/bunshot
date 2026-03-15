@@ -210,6 +210,15 @@ export const sqliteAuthAdapter: AuthAdapter = {
     ).get(userId);
     return row?.emailVerified === 1;
   },
+  async deleteUser(userId) {
+    getDb().run("DELETE FROM users WHERE id = ?", [userId]);
+  },
+  async hasPassword(userId) {
+    const row = getDb().query<{ passwordHash: string | null }, [string]>(
+      "SELECT passwordHash FROM users WHERE id = ?"
+    ).get(userId);
+    return !!row?.passwordHash;
+  },
 };
 
 // ---------------------------------------------------------------------------

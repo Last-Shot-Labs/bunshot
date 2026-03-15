@@ -160,6 +160,14 @@ export const memoryAuthAdapter: AuthAdapter = {
   async getEmailVerified(userId) {
     return _users.get(userId)?.emailVerified ?? false;
   },
+  async deleteUser(userId) {
+    const user = _users.get(userId);
+    if (user?.email) _byEmail.delete(user.email);
+    _users.delete(userId);
+  },
+  async hasPassword(userId) {
+    return !!_users.get(userId)?.passwordHash;
+  },
 };
 
 // ---------------------------------------------------------------------------

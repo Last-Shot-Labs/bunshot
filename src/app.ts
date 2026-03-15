@@ -102,6 +102,8 @@ export interface AuthRateLimitConfig {
   forgotPassword?: { windowMs?: number; max?: number };
   /** Max reset-password attempts per IP per window. Default: 10 per 15 min. */
   resetPassword?: { windowMs?: number; max?: number };
+  /** Max account deletion attempts per user per window. Default: 3 per hour. */
+  deleteAccount?: { windowMs?: number; max?: number };
   /**
    * Store backend for auth rate limit counters.
    * Defaults to "redis" when Redis is enabled, otherwise "memory".
@@ -147,6 +149,21 @@ export interface AuthConfig {
   rateLimit?: AuthRateLimitConfig;
   /** Session concurrency and metadata persistence policy. */
   sessionPolicy?: AuthSessionPolicyConfig;
+  /** Account deletion configuration. Enables DELETE /auth/me when the adapter supports deleteUser. */
+  accountDeletion?: AccountDeletionConfig;
+}
+
+export interface AccountDeletionConfig {
+  /** Called before deletion. Throw to abort (e.g., active subscription check). */
+  onBeforeDelete?: (userId: string) => Promise<void>;
+  /** Called after auth data is deleted. Runs at execution time — query current state, not a snapshot. */
+  onAfterDelete?: (userId: string) => Promise<void>;
+  /** When true, deletion is queued as a BullMQ job instead of running synchronously. Requires Redis + BullMQ. */
+  queued?: boolean;
+  /** Grace period in seconds before queued deletion executes. Default: 0 (immediate). */
+  gracePeriod?: number;
+  /** Called when deletion is scheduled (queued + gracePeriod > 0). Use to send a confirmation/cancel email. */
+  onDeletionScheduled?: (userId: string, email: string, cancelToken: string) => Promise<void>;
 }
 
 export interface AuthSessionPolicyConfig {
@@ -447,7 +464,7 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
 
   if (enableAuthRoutes) {
     const { createAuthRouter } = await import(`${coreRoutesDir}/auth`);
-    app.route("/", createAuthRouter({ primaryField, emailVerification, passwordReset, rateLimit: authRateLimit }));
+    app.route("/", createAuthRouter({ primaryField, emailVerification, passwordReset, rateLimit: authRateLimit, accountDeletion: authConfig.accountDeletion }));
   }
 
   if (configuredOAuth.length > 0) {

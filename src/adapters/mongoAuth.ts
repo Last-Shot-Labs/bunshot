@@ -88,4 +88,11 @@ export const mongoAuthAdapter: AuthAdapter = {
     const user = await AuthUser.findById(userId, "emailVerified").lean();
     return (user?.emailVerified as boolean | undefined) ?? false;
   },
+  async deleteUser(userId) {
+    await AuthUser.findByIdAndDelete(userId);
+  },
+  async hasPassword(userId) {
+    const user = await AuthUser.findById(userId, "password").lean();
+    return !!user?.password;
+  },
 };
