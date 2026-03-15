@@ -75,7 +75,7 @@ This is a **Bun + Hono API framework library** that consuming projects install a
 | `session.ts` | Multi-session CRUD — keyed by `sessionId` UUID; captures IP/UA metadata; enforces `maxSessions` with oldest-first eviction; exposes `getUserSessions`, `getActiveSessionCount`, `evictOldestSession`, `updateSessionLastActive`; refresh token support (`setRefreshToken`, `getSessionByRefreshToken`, `rotateRefreshToken`); store set via `db.sessions` ("redis" \| "mongo" \| "sqlite" \| "memory") |
 | `crypto.ts` | Centralized cryptographic utilities — `timingSafeEqual` (constant-time string comparison), `sha256` (SHA-256 hash); used across auth, MFA, token stores, and bearer auth |
 | `auth.ts` | Register/login/logout/password logic; timing-safe login (dummy hash on user-not-found to prevent user enumeration) |
-| `oauth.ts` | OAuth provider coordination via `arctic` — state store set via `db.oauthState` |
+| `oauth.ts` | OAuth provider coordination via `arctic` (Google, Apple, Microsoft Entra ID) — state store set via `db.oauthState` |
 | `oauthCode.ts` | One-time OAuth authorization code store/consume — `storeOAuthCode`, `consumeOAuthCode`; 4-backend (redis/mongo/sqlite/memory); SHA-256 hashed, 60s TTL, single-use |
 | `cache.ts` | Response cache — default store set via `db.cache`, overridable per-route; exports `bustCache` (all stores) and `bustCachePattern` (wildcard invalidation) |
 | `rateLimit.ts` | Per-key rate limiting; exports `trackAttempt`, `isLimited`, `bustAuthLimit` for use in custom routes |

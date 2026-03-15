@@ -1,6 +1,6 @@
 ## Social Login (OAuth)
 
-Pass `auth.oauth.providers` to enable Google and/or Apple sign-in. Routes are mounted automatically for each configured provider.
+Pass `auth.oauth.providers` to enable Google, Apple, and/or Microsoft sign-in. Routes are mounted automatically for each configured provider.
 
 ```ts
 auth: {

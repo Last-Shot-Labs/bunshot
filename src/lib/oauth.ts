@@ -1,4 +1,4 @@
-import { Google, Apple, generateState, generateCodeVerifier } from "arctic";
+import { Google, Apple, MicrosoftEntraId, generateState, generateCodeVerifier } from "arctic";
 import { getRedis } from "./redis";
 import { appConnection, mongoose } from "./mongo";
 import { getAppName } from "./appConfig";
@@ -8,9 +8,10 @@ import { memoryStoreOAuthState, memoryConsumeOAuthState } from "../adapters/memo
 export type OAuthProviderConfig = {
   google?: { clientId: string; clientSecret: string; redirectUri: string };
   apple?: { clientId: string; teamId: string; keyId: string; privateKey: string; redirectUri: string };
+  microsoft?: { tenantId: string; clientId: string; clientSecret: string; redirectUri: string };
 };
 
-type Providers = { google?: Google; apple?: Apple };
+type Providers = { google?: Google; apple?: Apple; microsoft?: MicrosoftEntraId };
 
 let _providers: Providers = {};
 
@@ -23,6 +24,10 @@ export const initOAuthProviders = (config: OAuthProviderConfig) => {
     const { clientId, teamId, keyId, privateKey, redirectUri } = config.apple;
     _providers.apple = new Apple(clientId, teamId, keyId, new TextEncoder().encode(privateKey), redirectUri);
   }
+  if (config.microsoft) {
+    const { tenantId, clientId, clientSecret, redirectUri } = config.microsoft;
+    _providers.microsoft = new MicrosoftEntraId(tenantId, clientId, clientSecret, redirectUri);
+  }
 };
 
 export const getGoogle = (): Google => {
@@ -33,6 +38,11 @@ export const getGoogle = (): Google => {
 export const getApple = (): Apple => {
   if (!_providers.apple) throw new Error("Apple OAuth not configured");
   return _providers.apple;
+};
+
+export const getMicrosoft = (): MicrosoftEntraId => {
+  if (!_providers.microsoft) throw new Error("Microsoft Entra ID OAuth not configured");
+  return _providers.microsoft;
 };
 
 export const getConfiguredOAuthProviders = (): string[] =>

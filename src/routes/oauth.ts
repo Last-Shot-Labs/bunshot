@@ -6,7 +6,7 @@ import { z } from "zod";
 import type { Context } from "hono";
 import type { AppEnv } from "@lib/context";
 import {
-  getGoogle, getApple,
+  getGoogle, getApple, getMicrosoft,
   storeOAuthState, consumeOAuthState,
   generateState, generateCodeVerifier,
 } from "@lib/oauth";
@@ -300,6 +300,118 @@ export const createOAuthRouter = (providers: string[], postLoginRedirect: string
         await storeOAuthState(state, undefined, c.get("authUserId")!);
         const url = getApple().createAuthorizationURL(state, ["name", "email"]);
         return c.redirect(url.toString());
+      }
+    );
+  }
+
+  // ─── Microsoft ──────────────────────────────────────────────────────────
+  if (providers.includes("microsoft")) {
+    router.openapi(
+      createRoute({
+        method: "get",
+        path: "/auth/microsoft",
+        summary: "Initiate Microsoft OAuth",
+        description: "Redirects the user to Microsoft's sign-in page to begin the OAuth login flow. After the user authorizes, Microsoft redirects back to `/auth/microsoft/callback`.",
+        tags,
+        responses: {
+          302: { description: "Redirect to Microsoft's OAuth sign-in page." },
+          500: { content: { "application/json": { schema: OAuthErrorResponse } }, description: "OAuth provider not configured." },
+        },
+      }),
+      async (c) => {
+        const state = generateState();
+        const codeVerifier = generateCodeVerifier();
+        await storeOAuthState(state, codeVerifier);
+        const url = getMicrosoft().createAuthorizationURL(state, codeVerifier, ["openid", "profile", "email"]);
+        return c.redirect(url.toString());
+      }
+    );
+
+    router.openapi(
+      createRoute({
+        method: "get",
+        path: "/auth/microsoft/callback",
+        summary: "Microsoft OAuth callback",
+        description: "Handles the redirect from Microsoft after user authorization. Validates the OAuth state and code, then creates or finds the user account. Sets a session cookie and redirects to the configured post-login URL.",
+        tags,
+        request: {
+          query: z.object({
+            code: z.string().describe("Authorization code from Microsoft."),
+            state: z.string().describe("OAuth state parameter for CSRF protection."),
+          }),
+        },
+        responses: {
+          302: { description: "Redirect to the post-login URL with session token." },
+          400: { content: { "application/json": { schema: OAuthErrorResponse } }, description: "Invalid callback parameters or expired state." },
+        },
+      }),
+      async (c) => {
+        const { code, state } = c.req.valid("query");
+        if (!code || !state) return c.json({ error: "Invalid callback" }, 400);
+
+        const stored = await consumeOAuthState(state);
+        if (!stored?.codeVerifier) return c.json({ error: "Invalid or expired state" }, 400);
+
+        const tokens = await getMicrosoft().validateAuthorizationCode(code, stored.codeVerifier);
+        const info = await fetch("https://graph.microsoft.com/v1.0/me", {
+          headers: { Authorization: `Bearer ${tokens.accessToken()}` },
+        }).then((r) => r.json()) as { id: string; displayName?: string; mail?: string; userPrincipalName?: string };
+
+        if (stored.linkUserId) {
+          const adapter = getAuthAdapter();
+          if (!adapter.linkProvider) return c.json({ error: "Auth adapter does not support linkProvider" }, 500);
+          await adapter.linkProvider(stored.linkUserId, "microsoft", info.id);
+          const sep = postLoginRedirect.includes("?") ? "&" : "?";
+          return c.redirect(`${postLoginRedirect}${sep}linked=microsoft`);
+        }
+
+        return finishOAuth(c, "microsoft", info.id, { email: info.mail ?? info.userPrincipalName, name: info.displayName }, postLoginRedirect);
+      }
+    );
+
+    router.use("/auth/microsoft/link", userAuth);
+
+    router.openapi(
+      withSecurity(createRoute({
+        method: "get",
+        path: "/auth/microsoft/link",
+        summary: "Link Microsoft account",
+        description: "Initiates an OAuth flow to link a Microsoft account to the authenticated user. Requires a valid session. Redirects to Microsoft's sign-in page.",
+        tags,
+        responses: {
+          302: { description: "Redirect to Microsoft's OAuth sign-in page." },
+          401: { content: { "application/json": { schema: OAuthErrorResponse } }, description: "No valid session." },
+        },
+      }), { cookieAuth: [] }, { userToken: [] }),
+      async (c) => {
+        const state = generateState();
+        const codeVerifier = generateCodeVerifier();
+        await storeOAuthState(state, codeVerifier, c.get("authUserId")!);
+        const url = getMicrosoft().createAuthorizationURL(state, codeVerifier, ["openid", "profile", "email"]);
+        return c.redirect(url.toString());
+      }
+    );
+
+    router.openapi(
+      withSecurity(createRoute({
+        method: "delete",
+        path: "/auth/microsoft/link",
+        summary: "Unlink Microsoft account",
+        description: "Removes the linked Microsoft OAuth account from the authenticated user. Requires a valid session.",
+        tags,
+        responses: {
+          204: { description: "Microsoft account unlinked successfully." },
+          401: { content: { "application/json": { schema: OAuthErrorResponse } }, description: "No valid session." },
+          500: { content: { "application/json": { schema: OAuthErrorResponse } }, description: "Auth adapter does not support unlinkProvider." },
+        },
+      }), { cookieAuth: [] }, { userToken: [] }),
+      async (c) => {
+        const adapter = getAuthAdapter();
+        if (!adapter.unlinkProvider) {
+          return c.json({ error: "Auth adapter does not support unlinkProvider" }, 500);
+        }
+        await adapter.unlinkProvider(c.get("authUserId")!, "microsoft");
+        return c.body(null, 204);
       }
     );
   }
