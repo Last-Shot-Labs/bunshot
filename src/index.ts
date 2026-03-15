@@ -2,6 +2,7 @@
 export { createApp } from "./app";
 export { createServer } from "./server";
 export type { CreateAppConfig, ModelSchemasConfig, DbConfig, AppMeta, AuthConfig, AuthRateLimitConfig, AccountDeletionConfig, OAuthConfig, SecurityConfig, BotProtectionConfig, PrimaryField, EmailVerificationConfig, PasswordResetConfig, RefreshTokenConfig, MfaConfig, MfaEmailOtpConfig, MfaWebAuthnConfig, JobsConfig, TenancyConfig, TenantConfig } from "./app";
+export type { PasswordPolicyConfig } from "@lib/appConfig";
 export type { CreateServerConfig, WsConfig } from "./server";
 
 // Database
@@ -22,6 +23,9 @@ export type { AppEnv, AppVariables } from "@lib/context";
 export { signToken, verifyToken } from "@lib/jwt";
 export { log } from "@lib/logger";
 export { createResetToken, consumeResetToken, setPasswordResetStore } from "@lib/resetPassword";
+export { timingSafeEqual, sha256 } from "@lib/crypto";
+export { storeOAuthCode, consumeOAuthCode, setOAuthCodeStore } from "@lib/oauthCode";
+export type { OAuthCodePayload } from "@lib/oauthCode";
 export { createSession, getSession, deleteSession, getUserSessions, getActiveSessionCount, evictOldestSession, updateSessionLastActive, setSessionStore, deleteUserSessions, setRefreshToken, getSessionByRefreshToken, rotateRefreshToken } from "@lib/session";
 export type { SessionMetadata, SessionInfo, RefreshResult } from "@lib/session";
 export { createVerificationToken, getVerificationToken, deleteVerificationToken } from "@lib/emailVerification";

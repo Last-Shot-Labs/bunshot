@@ -1185,9 +1185,16 @@ await createServer({
       includeInactiveSessions: false,       // default: false — include expired/deleted sessions in GET /auth/sessions
       trackLastActive: false,               // default: false — update lastActiveAt on every auth'd request (adds one DB write)
     },
+    passwordPolicy: {                        // optional — password complexity rules (applies to register + reset, not login)
+      minLength: 8,                         // default: 8
+      requireLetter: true,                  // default: true — at least one a–z or A–Z
+      requireDigit: true,                   // default: true — at least one 0–9
+      requireSpecial: false,                // default: false — at least one non-alphanumeric character
+    },
     oauth: {
       providers: { google: { ... }, apple: { ... } }, // omit a provider to disable it
       postRedirect: "/dashboard",           // default: "/"
+      allowedRedirectUrls: ["https://myapp.com"], // optional — validate postRedirect against allowlist at startup
     },
     refreshTokens: {                        // optional — short-lived access + long-lived refresh tokens
       accessTokenExpiry: 900,               // default: 900 (15 min)
@@ -1237,6 +1244,10 @@ await createServer({
     botProtection: {
       fingerprintRateLimit: true,           // rate-limit by HTTP fingerprint (IP-rotation resistant). default: false
       blockList: ["198.51.100.0/24"],       // IPv4 CIDRs or exact IPs to block with 403. default: []
+    },
+    headers: {                              // optional — additional security headers via Hono secureHeaders
+      contentSecurityPolicy: "default-src 'self'",  // CSP header value
+      permissionsPolicy: "camera=(), microphone=()", // Permissions-Policy header value
     },
   },
 
@@ -1610,6 +1621,25 @@ await createServer({
 
 When `queued: true`, deletion is enqueued as a BullMQ job instead of running synchronously. The endpoint returns `202 Accepted` immediately. With `gracePeriod > 0`, the user can cancel via `POST /auth/cancel-deletion`.
 
+### Password Policy
+
+Configure password complexity requirements via `auth.passwordPolicy`. The policy applies to registration and password reset — login uses `min(1)` intentionally to avoid locking out users registered under older/weaker policies.
+
+```ts
+await createServer({
+  auth: {
+    passwordPolicy: {
+      minLength: 10,          // default: 8
+      requireLetter: true,    // default: true — at least one a–z or A–Z
+      requireDigit: true,     // default: true — at least one 0–9
+      requireSpecial: true,   // default: false — at least one non-alphanumeric character
+    },
+  },
+});
+```
+
+When not configured, the default policy requires 8+ characters with at least one letter and one digit.
+
 ### Protecting routes
 
 ```ts
@@ -1714,6 +1744,7 @@ All built-in auth endpoints are rate-limited out of the box with sensible defaul
 | `POST /auth/resend-verification` | Identifier (email/username/phone) | Every attempt | 3 / hour |
 | `POST /auth/forgot-password` | IP address | Every attempt | 5 / 15 min |
 | `POST /auth/reset-password` | IP address | Every attempt | 10 / 15 min |
+| `POST /auth/refresh` | IP address | Every attempt | 30 / min |
 
 Login is keyed by the **identifier being targeted** — an attacker rotating IPs to brute-force `alice@example.com` is blocked regardless of source IP. A successful login resets the counter so legitimate users aren't locked out.
 
@@ -2117,13 +2148,62 @@ await createServer({
 
 > Apple sends its callback as a **POST** with form data. Your server must be publicly reachable and the redirect URI must be registered in the Apple developer console.
 
+Additionally, a shared code exchange endpoint is always mounted:
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /auth/oauth/exchange` | Exchange one-time authorization code for session token |
+
 ### Flow
 
 1. Client navigates to `GET /auth/google` (or `/auth/apple`)
 2. Package redirects to the provider's OAuth page
 3. Provider redirects (or POSTs) back to the callback URL
 4. Package exchanges the code, fetches the user profile, and calls `authAdapter.findOrCreateByProvider`
-5. A session is created, the `auth-token` cookie is set, and the user is redirected to `auth.oauth.postRedirect`
+5. A session is created and a **one-time authorization code** is generated
+6. User is redirected to `auth.oauth.postRedirect?code=<one-time-code>`
+7. Client exchanges the code for a session token via `POST /auth/oauth/exchange`
+
+> **Security:** The JWT is never exposed in the redirect URL. The one-time code expires after 60 seconds and can only be used once, preventing token leakage via browser history, server logs, or referrer headers.
+
+#### Code exchange
+
+After the OAuth redirect, the client must exchange the one-time code for a session token:
+
+```ts
+// Client-side
+const res = await fetch("/auth/oauth/exchange", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ code: new URLSearchParams(location.search).get("code") }),
+});
+const { token, userId, email, refreshToken } = await res.json();
+```
+
+The exchange endpoint sets session cookies automatically for browser clients. Mobile/SPA clients can use the JSON response directly. Rate limited to 20 requests per minute per IP.
+
+| Field | Description |
+|---|---|
+| `token` | Session JWT |
+| `userId` | Authenticated user ID |
+| `email` | User email (if available) |
+| `refreshToken` | Refresh token (only when `auth.refreshTokens` is configured) |
+
+### Redirect URL validation
+
+Pass `auth.oauth.allowedRedirectUrls` to restrict where OAuth callbacks can redirect:
+
+```ts
+auth: {
+  oauth: {
+    postRedirect: "/dashboard",
+    allowedRedirectUrls: ["https://myapp.com", "https://staging.myapp.com"],
+    providers: { ... },
+  },
+}
+```
+
+When configured, the `postRedirect` value is validated against the allowlist at startup. If omitted, any redirect URL is accepted (not recommended for production).
 
 ### User storage
 
@@ -2521,6 +2601,7 @@ import {
   createVerificationToken, getVerificationToken, deleteVerificationToken,  // email verification tokens
   createResetToken, consumeResetToken, setPasswordResetStore,              // password reset tokens
   createMfaChallenge, consumeMfaChallenge, replaceMfaChallengeOtp, setMfaChallengeStore, // MFA challenge tokens
+  storeOAuthCode, consumeOAuthCode, setOAuthCodeStore,               // OAuth one-time authorization codes
   bustAuthLimit, trackAttempt, isLimited, clearMemoryRateLimitStore, // auth rate limiting — use in custom routes or admin unlocks
   buildFingerprint,                                // HTTP fingerprint hash (IP-independent) — use in custom bot detection logic
   sqliteAuthAdapter, setSqliteDb, startSqliteCleanup,  // SQLite backend (persisted)
@@ -2545,6 +2626,10 @@ import {
   requireVerifiedEmail,                           // blocks unverified email addresses
   cacheResponse, bustCache, bustCachePattern, setCacheStore,  // response caching (tenant-namespaced)
 
+  // Crypto utilities
+  timingSafeEqual,                                  // constant-time string comparison for secrets/hashes
+  sha256,                                           // SHA-256 hash helper
+
   // Utilities
   HttpError, log, validate, createRouter, createRoute,
   registerSchema, registerSchemas,                // named OpenAPI schema registration
@@ -2563,7 +2648,7 @@ import {
   type DbConfig, type AppMeta, type AuthConfig, type OAuthConfig, type SecurityConfig,
   type PrimaryField, type EmailVerificationConfig, type PasswordResetConfig,
   type RefreshTokenConfig, type MfaConfig, type MfaEmailOtpConfig, type JobsConfig,
-  type AccountDeletionConfig,
+  type AccountDeletionConfig, type PasswordPolicyConfig, type OAuthCodePayload,
   type SocketData, type WsConfig,
 } from "@lastshotlabs/bunshot";
 

@@ -508,6 +508,7 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
         responses: {
           200: { content: { "application/json": { schema: RefreshResponse } }, description: "New access and refresh tokens." },
           401: { content: { "application/json": { schema: ErrorResponse } }, description: "Invalid or expired refresh token, or session invalidated due to token theft detection." },
+          429: { content: { "application/json": { schema: ErrorResponse } }, description: "Too many refresh attempts. Try again later." },
         },
       }),
       async (c) => {

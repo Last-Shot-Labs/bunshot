@@ -37,13 +37,62 @@ await createServer({
 
 > Apple sends its callback as a **POST** with form data. Your server must be publicly reachable and the redirect URI must be registered in the Apple developer console.
 
+Additionally, a shared code exchange endpoint is always mounted:
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /auth/oauth/exchange` | Exchange one-time authorization code for session token |
+
 ### Flow
 
 1. Client navigates to `GET /auth/google` (or `/auth/apple`)
 2. Package redirects to the provider's OAuth page
 3. Provider redirects (or POSTs) back to the callback URL
 4. Package exchanges the code, fetches the user profile, and calls `authAdapter.findOrCreateByProvider`
-5. A session is created, the `auth-token` cookie is set, and the user is redirected to `auth.oauth.postRedirect`
+5. A session is created and a **one-time authorization code** is generated
+6. User is redirected to `auth.oauth.postRedirect?code=<one-time-code>`
+7. Client exchanges the code for a session token via `POST /auth/oauth/exchange`
+
+> **Security:** The JWT is never exposed in the redirect URL. The one-time code expires after 60 seconds and can only be used once, preventing token leakage via browser history, server logs, or referrer headers.
+
+#### Code exchange
+
+After the OAuth redirect, the client must exchange the one-time code for a session token:
+
+```ts
+// Client-side
+const res = await fetch("/auth/oauth/exchange", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ code: new URLSearchParams(location.search).get("code") }),
+});
+const { token, userId, email, refreshToken } = await res.json();
+```
+
+The exchange endpoint sets session cookies automatically for browser clients. Mobile/SPA clients can use the JSON response directly. Rate limited to 20 requests per minute per IP.
+
+| Field | Description |
+|---|---|
+| `token` | Session JWT |
+| `userId` | Authenticated user ID |
+| `email` | User email (if available) |
+| `refreshToken` | Refresh token (only when `auth.refreshTokens` is configured) |
+
+### Redirect URL validation
+
+Pass `auth.oauth.allowedRedirectUrls` to restrict where OAuth callbacks can redirect:
+
+```ts
+auth: {
+  oauth: {
+    postRedirect: "/dashboard",
+    allowedRedirectUrls: ["https://myapp.com", "https://staging.myapp.com"],
+    providers: { ... },
+  },
+}
+```
+
+When configured, the `postRedirect` value is validated against the allowlist at startup. If omitted, any redirect URL is accepted (not recommended for production).
 
 ### User storage
 

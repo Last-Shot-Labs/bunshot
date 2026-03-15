@@ -256,6 +256,25 @@ await createServer({
 
 When `queued: true`, deletion is enqueued as a BullMQ job instead of running synchronously. The endpoint returns `202 Accepted` immediately. With `gracePeriod > 0`, the user can cancel via `POST /auth/cancel-deletion`.
 
+### Password Policy
+
+Configure password complexity requirements via `auth.passwordPolicy`. The policy applies to registration and password reset — login uses `min(1)` intentionally to avoid locking out users registered under older/weaker policies.
+
+```ts
+await createServer({
+  auth: {
+    passwordPolicy: {
+      minLength: 10,          // default: 8
+      requireLetter: true,    // default: true — at least one a–z or A–Z
+      requireDigit: true,     // default: true — at least one 0–9
+      requireSpecial: true,   // default: false — at least one non-alphanumeric character
+    },
+  },
+});
+```
+
+When not configured, the default policy requires 8+ characters with at least one letter and one digit.
+
 ### Protecting routes
 
 ```ts
@@ -360,6 +379,7 @@ All built-in auth endpoints are rate-limited out of the box with sensible defaul
 | `POST /auth/resend-verification` | Identifier (email/username/phone) | Every attempt | 3 / hour |
 | `POST /auth/forgot-password` | IP address | Every attempt | 5 / 15 min |
 | `POST /auth/reset-password` | IP address | Every attempt | 10 / 15 min |
+| `POST /auth/refresh` | IP address | Every attempt | 30 / min |
 
 Login is keyed by the **identifier being targeted** — an attacker rotating IPs to brute-force `alice@example.com` is blocked regardless of source IP. A successful login resets the counter so legitimate users aren't locked out.
 

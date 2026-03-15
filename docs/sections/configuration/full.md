@@ -51,9 +51,16 @@ await createServer({
       includeInactiveSessions: false,       // default: false — include expired/deleted sessions in GET /auth/sessions
       trackLastActive: false,               // default: false — update lastActiveAt on every auth'd request (adds one DB write)
     },
+    passwordPolicy: {                        // optional — password complexity rules (applies to register + reset, not login)
+      minLength: 8,                         // default: 8
+      requireLetter: true,                  // default: true — at least one a–z or A–Z
+      requireDigit: true,                   // default: true — at least one 0–9
+      requireSpecial: false,                // default: false — at least one non-alphanumeric character
+    },
     oauth: {
       providers: { google: { ... }, apple: { ... } }, // omit a provider to disable it
       postRedirect: "/dashboard",           // default: "/"
+      allowedRedirectUrls: ["https://myapp.com"], // optional — validate postRedirect against allowlist at startup
     },
     refreshTokens: {                        // optional — short-lived access + long-lived refresh tokens
       accessTokenExpiry: 900,               // default: 900 (15 min)
@@ -103,6 +110,10 @@ await createServer({
     botProtection: {
       fingerprintRateLimit: true,           // rate-limit by HTTP fingerprint (IP-rotation resistant). default: false
       blockList: ["198.51.100.0/24"],       // IPv4 CIDRs or exact IPs to block with 403. default: []
+    },
+    headers: {                              // optional — additional security headers via Hono secureHeaders
+      contentSecurityPolicy: "default-src 'self'",  // CSP header value
+      permissionsPolicy: "camera=(), microphone=()", // Permissions-Policy header value
     },
   },
 

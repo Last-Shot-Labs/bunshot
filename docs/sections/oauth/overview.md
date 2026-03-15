@@ -13,4 +13,4 @@ auth: {
 }
 ```
 
-Auto-mounted routes per provider: initiate (`GET /auth/{provider}`), callback, link to existing account (`GET /auth/{provider}/link`), and unlink (`DELETE /auth/{provider}/link`). Supports custom adapters via `findOrCreateByProvider`, `linkProvider`, and `unlinkProvider`.
+Auto-mounted routes per provider: initiate (`GET /auth/{provider}`), callback, link to existing account (`GET /auth/{provider}/link`), and unlink (`DELETE /auth/{provider}/link`). After OAuth redirect, the client exchanges a one-time authorization code via `POST /auth/oauth/exchange` to receive the session token (the JWT is never exposed in the redirect URL). Supports custom adapters via `findOrCreateByProvider`, `linkProvider`, and `unlinkProvider`. Optionally restrict redirect URLs with `allowedRedirectUrls`.
