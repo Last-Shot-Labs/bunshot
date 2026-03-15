@@ -1,13 +1,14 @@
 import { createRoute, withSecurity } from "@lib/createRoute";
 import { z } from "zod";
-import { setCookie, getCookie } from "hono/cookie";
+import { setCookie } from "hono/cookie";
 import { createRouter } from "@lib/context";
 import { userAuth } from "@middleware/userAuth";
 import * as MfaService from "@services/mfa";
 import * as AuthService from "@services/auth";
-import { consumeMfaChallenge } from "@lib/mfaChallenge";
-import { COOKIE_TOKEN, COOKIE_REFRESH_TOKEN, HEADER_REFRESH_TOKEN } from "@lib/constants";
-import { getRefreshTokenConfig, getAccessTokenExpiry, getRefreshTokenExpiry } from "@lib/appConfig";
+import { consumeMfaChallenge, replaceMfaChallengeOtp } from "@lib/mfaChallenge";
+import { COOKIE_TOKEN, COOKIE_REFRESH_TOKEN } from "@lib/constants";
+import { getRefreshTokenConfig, getAccessTokenExpiry, getRefreshTokenExpiry, getMfaEmailOtpConfig } from "@lib/appConfig";
+import { getAuthAdapter } from "@lib/authAdapter";
 
 const isProd = process.env.NODE_ENV === "production";
 const cookieOptions = (maxAge?: number) => ({
@@ -29,6 +30,10 @@ export const createMfaRouter = () => {
   router.use("/auth/mfa/verify-setup", userAuth);
   router.use("/auth/mfa", userAuth);
   router.use("/auth/mfa/recovery-codes", userAuth);
+  router.use("/auth/mfa/email-otp/enable", userAuth);
+  router.use("/auth/mfa/email-otp/verify-setup", userAuth);
+  router.use("/auth/mfa/email-otp", userAuth);
+  router.use("/auth/mfa/methods", userAuth);
 
   // ─── Setup ────────────────────────────────────────────────────────────────
 
@@ -69,7 +74,7 @@ export const createMfaRouter = () => {
       method: "post",
       path: "/auth/mfa/verify-setup",
       summary: "Confirm MFA setup",
-      description: "Verifies a TOTP code from the authenticator app and enables MFA. Returns one-time recovery codes that should be stored securely.",
+      description: "Verifies a TOTP code from the authenticator app and enables MFA. Returns one-time recovery codes that should be stored securely. If email OTP was previously enabled, recovery codes are regenerated.",
       tags,
       request: {
         body: {
@@ -120,7 +125,7 @@ export const createMfaRouter = () => {
       method: "post",
       path: "/auth/mfa/verify",
       summary: "Complete MFA login",
-      description: "Completes login by verifying a TOTP code or recovery code after password authentication. Requires the mfaToken returned from the login endpoint.",
+      description: "Completes login by verifying a TOTP code, email OTP code, or recovery code after password authentication. Requires the mfaToken returned from the login endpoint. Optionally specify 'method' to target a specific verification method.",
       tags,
       request: {
         body: {
@@ -128,7 +133,8 @@ export const createMfaRouter = () => {
             "application/json": {
               schema: z.object({
                 mfaToken: z.string().describe("MFA challenge token from the login response."),
-                code: z.string().describe("6-digit TOTP code or 8-character recovery code."),
+                code: z.string().describe("6-digit TOTP/email OTP code or 8-character recovery code."),
+                method: z.enum(["totp", "emailOtp"]).optional().describe("Specify which MFA method to verify. If omitted, methods are tried automatically."),
               }),
             },
           },
@@ -140,18 +146,37 @@ export const createMfaRouter = () => {
       },
     }),
     async (c) => {
-      const { mfaToken, code } = c.req.valid("json");
+      const { mfaToken, code, method } = c.req.valid("json");
 
       const challenge = await consumeMfaChallenge(mfaToken);
       if (!challenge) return c.json({ error: "Invalid or expired MFA token" }, 401);
 
-      const { userId } = challenge;
+      const { userId, emailOtpHash } = challenge;
+      let valid = false;
 
-      // Try TOTP first, then recovery code
-      let valid = await MfaService.verifyTotp(userId, code);
+      if (method === "totp") {
+        // Only try TOTP
+        valid = await MfaService.verifyTotp(userId, code);
+      } else if (method === "emailOtp") {
+        // Only try email OTP
+        if (emailOtpHash) valid = MfaService.verifyEmailOtp(emailOtpHash, code);
+      } else {
+        // Auto-detect: use emailOtpHash presence to pick order
+        if (emailOtpHash) {
+          // Email OTP first, then TOTP, then recovery
+          valid = MfaService.verifyEmailOtp(emailOtpHash, code);
+          if (!valid) valid = await MfaService.verifyTotp(userId, code);
+        } else {
+          // TOTP first
+          valid = await MfaService.verifyTotp(userId, code);
+        }
+      }
+
+      // Always try recovery code as fallback
       if (!valid) {
         valid = await MfaService.verifyRecoveryCode(userId, code);
       }
+
       if (!valid) return c.json({ error: "Invalid MFA code" }, 401);
 
       // Create session — reuse the service helper for refresh token support
@@ -244,6 +269,197 @@ export const createMfaRouter = () => {
       const { code } = c.req.valid("json");
       const recoveryCodes = await MfaService.regenerateRecoveryCodes(userId, code);
       return c.json({ recoveryCodes }, 200);
+    }
+  );
+
+  // ─── Email OTP: Enable (initiate) ────────────────────────────────────────
+
+  router.openapi(
+    withSecurity(createRoute({
+      method: "post",
+      path: "/auth/mfa/email-otp/enable",
+      summary: "Initiate email OTP setup",
+      description: "Sends a verification code to the user's email to confirm email OTP setup. Confirm via POST /auth/mfa/email-otp/verify-setup.",
+      tags,
+      responses: {
+        200: {
+          content: {
+            "application/json": {
+              schema: z.object({
+                message: z.string(),
+                setupToken: z.string().describe("Setup challenge token. Pass to POST /auth/mfa/email-otp/verify-setup with the code."),
+              }),
+            },
+          },
+          description: "Verification code sent to email.",
+        },
+        400: { content: { "application/json": { schema: ErrorResponse } }, description: "No email address on account." },
+        401: { content: { "application/json": { schema: ErrorResponse } }, description: "No valid session." },
+        501: { content: { "application/json": { schema: ErrorResponse } }, description: "Email OTP is not configured." },
+      },
+    }), { cookieAuth: [] }, { userToken: [] }),
+    async (c) => {
+      const userId = c.get("authUserId")!;
+      const setupToken = await MfaService.initiateEmailOtp(userId);
+      return c.json({ message: "Verification code sent", setupToken }, 200);
+    }
+  );
+
+  // ─── Email OTP: Verify Setup ─────────────────────────────────────────────
+
+  router.openapi(
+    withSecurity(createRoute({
+      method: "post",
+      path: "/auth/mfa/email-otp/verify-setup",
+      summary: "Confirm email OTP setup",
+      description: "Verifies the code sent during email OTP initiation and enables email OTP as an MFA method. Returns recovery codes (new or regenerated if another MFA method was already active).",
+      tags,
+      request: {
+        body: {
+          content: {
+            "application/json": {
+              schema: z.object({
+                setupToken: z.string().describe("Setup challenge token from POST /auth/mfa/email-otp/enable."),
+                code: z.string().describe("Verification code sent to email."),
+              }),
+            },
+          },
+        },
+      },
+      responses: {
+        200: {
+          content: {
+            "application/json": {
+              schema: z.object({
+                message: z.string(),
+                recoveryCodes: z.array(z.string()).optional().describe("Recovery codes (always returned when email OTP is enabled)."),
+              }),
+            },
+          },
+          description: "Email OTP enabled.",
+        },
+        401: { content: { "application/json": { schema: ErrorResponse } }, description: "Invalid setup token or code." },
+        501: { content: { "application/json": { schema: ErrorResponse } }, description: "Auth adapter does not support MFA." },
+      },
+    }), { cookieAuth: [] }, { userToken: [] }),
+    async (c) => {
+      const userId = c.get("authUserId")!;
+      const { setupToken, code } = c.req.valid("json");
+      const recoveryCodes = await MfaService.confirmEmailOtp(userId, setupToken, code);
+      return c.json({ message: "Email OTP enabled", recoveryCodes: recoveryCodes ?? undefined }, 200);
+    }
+  );
+
+  // ─── Email OTP: Disable ──────────────────────────────────────────────────
+
+  router.openapi(
+    withSecurity(createRoute({
+      method: "delete",
+      path: "/auth/mfa/email-otp",
+      summary: "Disable email OTP",
+      description: "Disables email OTP for the authenticated user. Requires a TOTP code if TOTP is also enabled, or a password if email OTP is the only MFA method.",
+      tags,
+      request: {
+        body: {
+          content: {
+            "application/json": {
+              schema: z.object({
+                code: z.string().optional().describe("6-digit TOTP code (required when TOTP is also enabled)."),
+                password: z.string().optional().describe("Account password (required when email OTP is the only MFA method)."),
+              }),
+            },
+          },
+        },
+      },
+      responses: {
+        200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Email OTP disabled." },
+        400: { content: { "application/json": { schema: ErrorResponse } }, description: "Missing required verification." },
+        401: { content: { "application/json": { schema: ErrorResponse } }, description: "Invalid code/password or no valid session." },
+        501: { content: { "application/json": { schema: ErrorResponse } }, description: "Auth adapter does not support MFA." },
+      },
+    }), { cookieAuth: [] }, { userToken: [] }),
+    async (c) => {
+      const userId = c.get("authUserId")!;
+      const { code, password } = c.req.valid("json");
+      await MfaService.disableEmailOtp(userId, { code, password });
+      return c.json({ message: "Email OTP disabled" }, 200);
+    }
+  );
+
+  // ─── Resend Email OTP ────────────────────────────────────────────────────
+
+  router.openapi(
+    createRoute({
+      method: "post",
+      path: "/auth/mfa/resend",
+      summary: "Resend email OTP code",
+      description: "Generates and sends a new email OTP code for the given MFA challenge. Rate-limited to 3 resends per challenge. Does not extend the challenge beyond 3x the original TTL.",
+      tags,
+      request: {
+        body: {
+          content: {
+            "application/json": {
+              schema: z.object({
+                mfaToken: z.string().describe("MFA challenge token from the login response."),
+              }),
+            },
+          },
+        },
+      },
+      responses: {
+        200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Code sent." },
+        400: { content: { "application/json": { schema: ErrorResponse } }, description: "Email OTP not configured." },
+        401: { content: { "application/json": { schema: ErrorResponse } }, description: "Invalid or expired MFA token." },
+        429: { content: { "application/json": { schema: ErrorResponse } }, description: "Maximum resends reached." },
+      },
+    }),
+    async (c) => {
+      const { mfaToken } = c.req.valid("json");
+      const emailOtpConfig = getMfaEmailOtpConfig();
+      if (!emailOtpConfig) return c.json({ error: "Email OTP is not configured" }, 400);
+
+      const { code, hash } = MfaService.generateEmailOtpCode();
+      const result = await replaceMfaChallengeOtp(mfaToken, hash);
+      if (!result) return c.json({ error: "Invalid/expired MFA token or maximum resends reached" }, 401);
+
+      // Get user email and send
+      const adapter = getAuthAdapter();
+      const user = adapter.getUser ? await adapter.getUser(result.userId) : null;
+      if (user?.email) {
+        await emailOtpConfig.onSend(user.email, code);
+      }
+
+      return c.json({ message: "Code sent" }, 200);
+    }
+  );
+
+  // ─── Get MFA Methods ────────────────────────────────────────────────────
+
+  router.openapi(
+    withSecurity(createRoute({
+      method: "get",
+      path: "/auth/mfa/methods",
+      summary: "Get enabled MFA methods",
+      description: "Returns the MFA methods currently enabled for the authenticated user.",
+      tags,
+      responses: {
+        200: {
+          content: {
+            "application/json": {
+              schema: z.object({
+                methods: z.array(z.string()).describe("Enabled MFA methods (e.g., 'totp', 'emailOtp')."),
+              }),
+            },
+          },
+          description: "Enabled MFA methods.",
+        },
+        401: { content: { "application/json": { schema: ErrorResponse } }, description: "No valid session." },
+      },
+    }), { cookieAuth: [] }, { userToken: [] }),
+    async (c) => {
+      const userId = c.get("authUserId")!;
+      const methods = await MfaService.getMfaMethods(userId);
+      return c.json({ methods }, 200);
     }
   );
 

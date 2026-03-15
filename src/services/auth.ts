@@ -3,9 +3,10 @@ import { HttpError } from "@lib/HttpError";
 import { signToken, verifyToken } from "@lib/jwt";
 import { createSession, deleteSession, getActiveSessionCount, evictOldestSession, deleteUserSessions, setRefreshToken, getSessionByRefreshToken, rotateRefreshToken } from "@lib/session";
 import type { SessionMetadata } from "@lib/session";
-import { getDefaultRole, getPrimaryField, getEmailVerificationConfig, getMaxSessions, getRefreshTokenConfig, getAccessTokenExpiry, getRefreshTokenExpiry, getMfaConfig } from "@lib/appConfig";
+import { getDefaultRole, getPrimaryField, getEmailVerificationConfig, getMaxSessions, getRefreshTokenConfig, getAccessTokenExpiry, getRefreshTokenExpiry, getMfaConfig, getMfaEmailOtpConfig } from "@lib/appConfig";
 import { createVerificationToken } from "@lib/emailVerification";
 import { createMfaChallenge } from "@lib/mfaChallenge";
+import { generateEmailOtpCode } from "@services/mfa";
 
 export interface AuthResult {
   token: string;
@@ -16,6 +17,7 @@ export interface AuthResult {
   refreshToken?: string;
   mfaRequired?: boolean;
   mfaToken?: string;
+  mfaMethods?: string[];
 }
 
 async function createSessionWithRefreshToken(userId: string, sessionId: string, metadata?: SessionMetadata): Promise<{ token: string; refreshToken?: string; sessionId: string }> {
@@ -88,8 +90,22 @@ export const login = async (identifier: string, password: string, metadata?: Ses
 
   // Check MFA — if enabled, return challenge token instead of session
   if (getMfaConfig() && adapter.isMfaEnabled && await adapter.isMfaEnabled(user.id)) {
-    const mfaToken = await createMfaChallenge(user.id);
-    return { token: "", userId: user.id, mfaRequired: true, mfaToken };
+    const methods = adapter.getMfaMethods
+      ? await adapter.getMfaMethods(user.id)
+      : ["totp"];
+
+    // Auto-send email OTP if enabled
+    let emailOtpHash: string | undefined;
+    const emailOtpConfig = getMfaEmailOtpConfig();
+    if (methods.includes("emailOtp") && emailOtpConfig) {
+      const { code, hash } = generateEmailOtpCode();
+      emailOtpHash = hash;
+      const email = fullUser?.email;
+      if (email) await emailOtpConfig.onSend(email, code);
+    }
+
+    const mfaToken = await createMfaChallenge(user.id, emailOtpHash);
+    return { token: "", userId: user.id, mfaRequired: true, mfaToken, mfaMethods: methods };
   }
 
   const sessionId = crypto.randomUUID();

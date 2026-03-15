@@ -25,6 +25,7 @@ const TokenResponse = z.object({
   refreshToken: z.string().optional().describe("Refresh token (present when refreshTokens is configured). Also set as an HttpOnly cookie."),
   mfaRequired: z.boolean().optional().describe("When true, complete MFA via POST /auth/mfa/verify before accessing the API."),
   mfaToken: z.string().optional().describe("MFA challenge token. Pass to POST /auth/mfa/verify with a TOTP or recovery code."),
+  mfaMethods: z.array(z.string()).optional().describe("Available MFA methods when mfaRequired is true (e.g., 'totp', 'emailOtp')."),
 }).openapi("TokenResponse");
 const ErrorResponse = z.object({ error: z.string().describe("Human-readable error message.") }).openapi("ErrorResponse");
 const tags = ["Auth"];
