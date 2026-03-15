@@ -13,9 +13,12 @@ bun run dev     # Watch mode (hot reload)
 bun run start   # Run without watch
 bun run readme  # Compile README.md from docs/sections/ (default profile — all full)
 bun run readme:npm  # Compile with npm profile (overview variants for large sections)
+bun test                       # Run all tests
+bun test tests/unit            # Unit tests only
+bun test tests/integration     # Integration tests only
 ```
 
-There are no build, test, or lint scripts — this is a library package published to npm as `@lastshotlabs/bunshot`.
+Tests use Bun's native test runner with all-memory stores (no Docker, databases, or external services). `bunfig.toml` preloads `tests/setup.ts` to set env vars before module initialization. Test files live in `tests/` (not in `src/`). Call `clearMemoryStore()` in `beforeEach` for full test isolation.
 
 ### Modular README
 

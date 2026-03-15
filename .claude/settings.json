@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cmd.exe /c \"where bun\")",
+      "Read(//c/Users/email/**)"
+    ]
+  }
+}

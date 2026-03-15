@@ -51,7 +51,8 @@
     "dev": "bun --watch src/index.ts",
     "start": "bun src/index.ts",
     "readme": "bun docs/build-readme.ts",
-    "readme:npm": "bun docs/build-readme.ts npm"
+    "readme:npm": "bun docs/build-readme.ts npm",
+    "test": "bun test"
   },
   "dependencies": {
     "@hono/zod-openapi": "1.2.2",
