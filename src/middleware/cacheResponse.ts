@@ -159,7 +159,10 @@ export const cacheResponse = ({ ttl, key, store = _defaultCacheStore }: CacheOpt
   return async (c, next) => {
     const appName = getAppName();
     const rawKey = typeof key === "function" ? key(c) : key;
-    const cacheKey = `cache:${appName}:${rawKey}`;
+    // Per-tenant namespacing: prevents two tenants caching the same key from colliding
+    const tenantId = c.get("tenantId");
+    const tenantSegment = tenantId ? `${tenantId}:` : "";
+    const cacheKey = `cache:${appName}:${tenantSegment}${rawKey}`;
 
     const cached = await storeGet(store, cacheKey);
     if (cached) {

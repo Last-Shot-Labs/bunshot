@@ -48,7 +48,7 @@ export { buildFingerprint } from "@lib/fingerprint";
 // Models
 export { sqliteAuthAdapter, setSqliteDb, startSqliteCleanup } from "./adapters/sqliteAuth";
 export { memoryAuthAdapter, clearMemoryStore } from "./adapters/memoryAuth";
-export { setUserRoles, addUserRole, removeUserRole } from "@lib/roles";
+export { setUserRoles, addUserRole, removeUserRole, getTenantRoles, setTenantRoles, addTenantRole, removeTenantRole } from "@lib/roles";
 export type { AuthAdapter, OAuthProfile } from "@lib/authAdapter";
 export type { OAuthProviderConfig } from "@lib/oauth";
 

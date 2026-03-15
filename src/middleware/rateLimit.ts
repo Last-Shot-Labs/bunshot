@@ -1,6 +1,7 @@
 import type { MiddlewareHandler } from "hono";
 import { trackAttempt } from "@lib/authRateLimit";
 import { buildFingerprint } from "@lib/fingerprint";
+import type { AppEnv } from "@lib/context";
 
 export interface RateLimitOptions {
   windowMs: number;
@@ -13,7 +14,7 @@ export const rateLimit = ({
   windowMs,
   max,
   fingerprintLimit = false,
-}: RateLimitOptions): MiddlewareHandler => {
+}: RateLimitOptions): MiddlewareHandler<AppEnv> => {
   const opts = { windowMs, max };
 
   return async (c, next) => {
@@ -21,13 +22,17 @@ export const rateLimit = ({
     const raw = c.req.header("x-forwarded-for") ?? "";
     const ip = raw.split(",")[0]?.trim() || "unknown";
 
-    if (await trackAttempt(`ip:${ip}`, opts)) {
+    // Per-tenant namespacing: each tenant gets independent rate limit buckets
+    const tenantId = c.get("tenantId");
+    const prefix = tenantId ? `t:${tenantId}:` : "";
+
+    if (await trackAttempt(`${prefix}ip:${ip}`, opts)) {
       return c.json({ error: "Too Many Requests" }, 429);
     }
 
     if (fingerprintLimit) {
       const fp = await buildFingerprint(c.req.raw);
-      if (await trackAttempt(`fp:${fp}`, opts)) {
+      if (await trackAttempt(`${prefix}fp:${fp}`, opts)) {
         return c.json({ error: "Too Many Requests" }, 429);
       }
     }

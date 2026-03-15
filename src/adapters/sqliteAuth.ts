@@ -80,6 +80,13 @@ function initSchema(db: Database): void {
     email     TEXT NOT NULL,
     expiresAt INTEGER NOT NULL
   )`);
+  db.run(`CREATE TABLE IF NOT EXISTS tenant_roles (
+    userId    TEXT NOT NULL,
+    tenantId  TEXT NOT NULL,
+    role      TEXT NOT NULL,
+    PRIMARY KEY (userId, tenantId, role)
+  )`);
+  db.run("CREATE INDEX IF NOT EXISTS idx_tenant_roles_tenant ON tenant_roles(tenantId)");
 }
 
 // ---------------------------------------------------------------------------
@@ -262,6 +269,28 @@ export const sqliteAuthAdapter: AuthAdapter = {
       current.splice(idx, 1);
       await sqliteAuthAdapter.setRecoveryCodes!(userId, current);
     }
+  },
+  async getTenantRoles(userId, tenantId) {
+    const rows = getDb().query<{ role: string }, [string, string]>(
+      "SELECT role FROM tenant_roles WHERE userId = ? AND tenantId = ?"
+    ).all(userId, tenantId);
+    return rows.map((r) => r.role);
+  },
+  async setTenantRoles(userId, tenantId, roles) {
+    const db = getDb();
+    db.run("DELETE FROM tenant_roles WHERE userId = ? AND tenantId = ?", [userId, tenantId]);
+    const stmt = db.prepare("INSERT INTO tenant_roles (userId, tenantId, role) VALUES (?, ?, ?)");
+    for (const role of roles) {
+      stmt.run(userId, tenantId, role);
+    }
+  },
+  async addTenantRole(userId, tenantId, role) {
+    try {
+      getDb().run("INSERT INTO tenant_roles (userId, tenantId, role) VALUES (?, ?, ?)", [userId, tenantId, role]);
+    } catch { /* already exists */ }
+  },
+  async removeTenantRole(userId, tenantId, role) {
+    getDb().run("DELETE FROM tenant_roles WHERE userId = ? AND tenantId = ? AND role = ?", [userId, tenantId, role]);
   },
 };
 

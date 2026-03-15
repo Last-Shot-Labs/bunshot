@@ -338,38 +338,43 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
       }
     );
 
-    router.use("/auth/resend-verification", userAuth);
-
     router.openapi(
-      withSecurity(createRoute({
+      createRoute({
         method: "post",
         path: "/auth/resend-verification",
         summary: "Resend verification email",
-        description: "Sends a new verification email to the authenticated user's address. Returns 400 if already verified. Rate-limited per user. Requires a valid session.",
+        description: "Authenticates with credentials and sends a new verification email. Returns 400 if already verified. Rate-limited per identifier. Does not require a session.",
         tags,
+        request: { body: { content: { "application/json": { schema: LoginSchema } }, description: "Login credentials to identify the account." } },
         responses: {
           200: { content: { "application/json": { schema: z.object({ message: z.string() }) } }, description: "Verification email sent." },
           400: { content: { "application/json": { schema: ErrorResponse } }, description: "Email is already verified, or no email address on file." },
-          401: { content: { "application/json": { schema: ErrorResponse } }, description: "No valid session." },
-          429: { content: { "application/json": { schema: ErrorResponse } }, description: "Too many resend attempts for this user. Try again later." },
+          401: { content: { "application/json": { schema: ErrorResponse } }, description: "Invalid credentials." },
+          429: { content: { "application/json": { schema: ErrorResponse } }, description: "Too many resend attempts for this identifier. Try again later." },
           501: { content: { "application/json": { schema: ErrorResponse } }, description: "The configured auth adapter does not support email verification." },
         },
-      }), { cookieAuth: [] }, { userToken: [] }),
+      }),
       async (c) => {
         const adapter = getAuthAdapter();
         if (!adapter.getEmailVerified || !adapter.getUser) {
           return c.json({ error: "Auth adapter does not support email verification" }, 501);
         }
-        const authUserId = c.get("authUserId")!;
-        if (await trackAttempt(`resend:${authUserId}`, resendOpts)) {
+        const body = c.req.valid("json") as Record<string, string>;
+        const identifier = body[primaryField];
+        if (await trackAttempt(`resend:${identifier}`, resendOpts)) {
           return c.json({ error: "Too many resend attempts. Try again later." }, 429);
         }
-        const alreadyVerified = await adapter.getEmailVerified(authUserId);
+        const findFn = adapter.findByIdentifier ?? adapter.findByEmail.bind(adapter);
+        const user = await findFn(identifier);
+        if (!user || !(await Bun.password.verify(body.password, user.passwordHash))) {
+          return c.json({ error: "Invalid credentials" }, 401);
+        }
+        const alreadyVerified = await adapter.getEmailVerified(user.id);
         if (alreadyVerified) return c.json({ error: "Email already verified" }, 400);
-        const user = await adapter.getUser(authUserId);
-        if (!user?.email) return c.json({ error: "No email address on file" }, 400);
-        const verificationToken = await createVerificationToken(authUserId, user.email);
-        await emailVerification.onSend(user.email, verificationToken);
+        const fullUser = await adapter.getUser(user.id);
+        if (!fullUser?.email) return c.json({ error: "No email address on file" }, 400);
+        const verificationToken = await createVerificationToken(user.id, fullUser.email);
+        await emailVerification.onSend(fullUser.email, verificationToken);
         return c.json({ message: "Verification email sent" }, 200);
       }
     );

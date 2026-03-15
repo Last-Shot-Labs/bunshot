@@ -52,6 +52,14 @@ export interface AuthAdapter {
   getRecoveryCodes?(userId: string): Promise<string[]>;
   /** Optional. Remove a single recovery code after use. */
   removeRecoveryCode?(userId: string, code: string): Promise<void>;
+  /** Optional. Get roles for a user within a specific tenant. */
+  getTenantRoles?(userId: string, tenantId: string): Promise<string[]>;
+  /** Optional. Set roles for a user within a specific tenant (replaces existing). */
+  setTenantRoles?(userId: string, tenantId: string, roles: string[]): Promise<void>;
+  /** Optional. Add a single role to a user within a specific tenant. */
+  addTenantRole?(userId: string, tenantId: string, role: string): Promise<void>;
+  /** Optional. Remove a single role from a user within a specific tenant. */
+  removeTenantRole?(userId: string, tenantId: string, role: string): Promise<void>;
 }
 
 let _adapter: AuthAdapter | null = null;

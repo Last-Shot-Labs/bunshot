@@ -42,6 +42,7 @@ const _oauthStates        = new Map<string, { codeVerifier?: string; linkUserId?
 const _cache              = new Map<string, { value: string; expiresAt?: number }>();
 const _verificationTokens = new Map<string, { userId: string; email: string; expiresAt: number }>();
 const _resetTokens        = new Map<string, { userId: string; email: string; expiresAt: number }>();
+const _tenantRoles        = new Map<string, string[]>();              // "userId:tenantId" → roles
 
 /** Reset all in-memory state. Useful for test isolation. */
 export const clearMemoryStore = (): void => {
@@ -50,6 +51,7 @@ export const clearMemoryStore = (): void => {
   _sessions.clear();
   _userSessionIds.clear();
   _refreshTokenIndex.clear();
+  _tenantRoles.clear();
   _oauthStates.clear();
   _cache.clear();
   _verificationTokens.clear();
@@ -200,6 +202,26 @@ export const memoryAuthAdapter: AuthAdapter = {
   async removeRecoveryCode(userId, code) {
     const user = _users.get(userId);
     if (user) user.recoveryCodes = user.recoveryCodes.filter((c) => c !== code);
+  },
+  async getTenantRoles(userId, tenantId) {
+    return _tenantRoles.get(`${userId}:${tenantId}`) ?? [];
+  },
+  async setTenantRoles(userId, tenantId, roles) {
+    _tenantRoles.set(`${userId}:${tenantId}`, [...roles]);
+  },
+  async addTenantRole(userId, tenantId, role) {
+    const key = `${userId}:${tenantId}`;
+    const current = _tenantRoles.get(key) ?? [];
+    if (!current.includes(role)) {
+      _tenantRoles.set(key, [...current, role]);
+    }
+  },
+  async removeTenantRole(userId, tenantId, role) {
+    const key = `${userId}:${tenantId}`;
+    const current = _tenantRoles.get(key);
+    if (current) {
+      _tenantRoles.set(key, current.filter((r) => r !== role));
+    }
   },
 };
 

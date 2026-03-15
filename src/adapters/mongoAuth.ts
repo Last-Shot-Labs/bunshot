@@ -1,4 +1,5 @@
 import { AuthUser } from "@models/AuthUser";
+import { TenantRole } from "@models/TenantRole";
 import { HttpError } from "@lib/HttpError";
 import type { AuthAdapter } from "@lib/authAdapter";
 
@@ -118,5 +119,29 @@ export const mongoAuthAdapter: AuthAdapter = {
   },
   async removeRecoveryCode(userId, code) {
     await AuthUser.findByIdAndUpdate(userId, { $pull: { recoveryCodes: code } });
+  },
+  async getTenantRoles(userId, tenantId) {
+    const doc = await TenantRole.findOne({ userId, tenantId }, "roles").lean();
+    return (doc?.roles as string[]) ?? [];
+  },
+  async setTenantRoles(userId, tenantId, roles) {
+    await TenantRole.findOneAndUpdate(
+      { userId, tenantId },
+      { roles },
+      { upsert: true }
+    );
+  },
+  async addTenantRole(userId, tenantId, role) {
+    await TenantRole.findOneAndUpdate(
+      { userId, tenantId },
+      { $addToSet: { roles: role } },
+      { upsert: true }
+    );
+  },
+  async removeTenantRole(userId, tenantId, role) {
+    await TenantRole.findOneAndUpdate(
+      { userId, tenantId },
+      { $pull: { roles: role } }
+    );
   },
 };
