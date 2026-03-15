@@ -22,7 +22,6 @@ import { memoryAuthAdapter } from "./adapters/memoryAuth";
 import { initOAuthProviders, getConfiguredOAuthProviders, setOAuthStateStore } from "@lib/oauth";
 import { setOAuthCodeStore } from "@lib/oauthCode";
 import type { OAuthProviderConfig } from "@lib/oauth";
-import { createOAuthRouter } from "@routes/oauth";
 import { connectMongo, connectAuthMongo, connectAppMongo } from "@lib/mongo";
 import { connectRedis } from "@lib/redis";
 import { setSessionStore } from "@lib/session";
@@ -648,6 +647,7 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
   }
 
   if (configuredOAuth.length > 0) {
+    const { createOAuthRouter } = await import(`${coreRoutesDir}/oauth`);
     app.route("/", createOAuthRouter(configuredOAuth, postOAuthRedirect));
   }
 

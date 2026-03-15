@@ -1,6 +1,6 @@
 {
   "name": "@lastshotlabs/bunshot",
-  "version": "0.0.20",
+  "version": "0.0.21",
   "description": "Batteries-included Bun + Hono API framework — auth, sessions, rate limiting, WebSocket, queues, and OpenAPI docs out of the box",
   "repository": {
     "type": "git",
