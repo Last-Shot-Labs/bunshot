@@ -486,3 +486,48 @@ describe("POST /auth/mfa/resend", () => {
     expect(verifyRes.status).toBe(200);
   });
 });
+
+// ---------------------------------------------------------------------------
+// MFA Rate Limiting
+// ---------------------------------------------------------------------------
+
+describe("MFA verify rate limiting", () => {
+  test("returns 429 after exceeding MFA verify attempts", async () => {
+    const { secret } = await registerAndSetupMfa();
+
+    const loginRes = await app.request("/auth/login", json({ email: "mfa@example.com", password: "password123" }));
+    const { mfaToken } = await loginRes.json();
+
+    // Default limit: 10 per 15 min. Fire 10 failed attempts to hit the limit.
+    for (let i = 0; i < 10; i++) {
+      await app.request("/auth/mfa/verify", json({ mfaToken, code: "000000" }));
+    }
+
+    // 11th attempt should be rate-limited regardless of correctness
+    const code = generateTotpCode(secret);
+    const res = await app.request("/auth/mfa/verify", json({ mfaToken, code }));
+    expect(res.status).toBe(429);
+    const body = await res.json();
+    expect(body.error).toContain("Too many");
+  });
+});
+
+describe("MFA resend rate limiting", () => {
+  test("returns 429 after exceeding MFA resend attempts", async () => {
+    await registerAndSetupMfa();
+
+    const loginRes = await app.request("/auth/login", json({ email: "mfa@example.com", password: "password123" }));
+    const { mfaToken } = await loginRes.json();
+
+    // Default limit: 5 per minute. Fire 5 requests to hit the limit.
+    for (let i = 0; i < 5; i++) {
+      await app.request("/auth/mfa/resend", json({ mfaToken }));
+    }
+
+    // 6th attempt should be rate-limited
+    const res = await app.request("/auth/mfa/resend", json({ mfaToken }));
+    expect(res.status).toBe(429);
+    const body = await res.json();
+    expect(body.error).toContain("Too many");
+  });
+});
