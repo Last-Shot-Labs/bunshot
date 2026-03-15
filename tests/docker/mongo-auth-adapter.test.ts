@@ -4,6 +4,9 @@ import { mongoAuthAdapter } from "../../src/adapters/mongoAuth";
 
 beforeAll(async () => {
   await connectTestMongo();
+  // Ensure indexes are built before tests run (prevents autoIndex race)
+  await mongoAuthAdapter.create("warmup@example.com", "warmup");
+  await flushTestServices();
 });
 
 afterAll(async () => {

@@ -41,13 +41,14 @@ export async function connectTestRedis(): Promise<void> {
 }
 
 /** Connect to Docker MongoDB (port 27018). Idempotent.
- *  Uses plain mongodb:// URI (not SRV) since this is local Docker. */
+ *  Uses plain mongodb:// URI (not SRV) since this is local Docker.
+ *  Checks readyState (not just a flag) in case another test file disconnected. */
 export async function connectTestMongo(): Promise<void> {
-  if (_mongoConnected) return;
-  // The connection proxies lazily create connections on first property access.
-  // We open both auth + app connections against the same local DB.
-  await authConnection.openUri(MONGO_URI);
-  await appConnection.openUri(MONGO_URI);
+  const needsAuth = authConnection.readyState !== 1;
+  const needsApp  = appConnection.readyState  !== 1;
+  if (!needsAuth && !needsApp) { _mongoConnected = true; return; }
+  if (needsAuth) await authConnection.openUri(MONGO_URI);
+  if (needsApp)  await appConnection.openUri(MONGO_URI);
   _mongoConnected = true;
 }
 
@@ -65,8 +66,8 @@ export async function flushTestServices(): Promise<void> {
     await redis.flushdb();
   }
 
-  // Mongo safety guard
-  if (_mongoConnected) {
+  // Mongo safety guard — also check readyState in case another file disconnected
+  if (_mongoConnected && authConnection.readyState === 1) {
     const dbName = authConnection.db?.databaseName;
     if (dbName !== EXPECTED_MONGO_DB) {
       throw new Error(

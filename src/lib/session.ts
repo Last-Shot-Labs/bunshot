@@ -88,7 +88,7 @@ function getSessionModel() {
     },
     { collection: "sessions", timestamps: false }
   );
-  sessionSchema.index({ refreshToken: 1 }, { sparse: true, unique: true });
+  sessionSchema.index({ refreshToken: 1 }, { unique: true, partialFilterExpression: { refreshToken: { $type: "string" } } });
   // Add TTL index only when metadata is not persisted — docs auto-delete at expiresAt.
   // When persisting, token is nulled (soft-delete) but the row is kept indefinitely.
   if (!getPersistSessionMetadata()) {
