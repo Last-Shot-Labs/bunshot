@@ -1,7 +1,7 @@
 // App factory
 export { createApp } from "./app";
 export { createServer } from "./server";
-export type { CreateAppConfig, ModelSchemasConfig, DbConfig, AppMeta, AuthConfig, AuthRateLimitConfig, AccountDeletionConfig, OAuthConfig, SecurityConfig, BotProtectionConfig, PrimaryField, EmailVerificationConfig, PasswordResetConfig, RefreshTokenConfig, MfaConfig } from "./app";
+export type { CreateAppConfig, ModelSchemasConfig, DbConfig, AppMeta, AuthConfig, AuthRateLimitConfig, AccountDeletionConfig, OAuthConfig, SecurityConfig, BotProtectionConfig, PrimaryField, EmailVerificationConfig, PasswordResetConfig, RefreshTokenConfig, MfaConfig, JobsConfig, TenancyConfig, TenantConfig } from "./app";
 export type { CreateServerConfig, WsConfig } from "./server";
 
 // Database
@@ -56,3 +56,8 @@ export type { OAuthProviderConfig } from "@lib/oauth";
 export { websocket, createWsUpgradeHandler } from "@ws/index";
 export type { SocketData } from "@ws/index";
 export { publish, subscribe, unsubscribe, getSubscriptions, handleRoomActions, getRooms, getRoomSubscribers } from "@lib/ws";
+
+// Tenancy
+export { createTenant, deleteTenant, getTenant, listTenants } from "@lib/tenant";
+export type { TenantInfo, CreateTenantOptions } from "@lib/tenant";
+export { invalidateTenantCache } from "@middleware/tenant";

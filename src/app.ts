@@ -258,6 +258,40 @@ export interface ModelSchemasConfig {
   registration?: "auto" | "explicit";
 }
 
+export interface JobsConfig {
+  /** Enable the job status endpoint. Default: false. */
+  statusEndpoint?: boolean;
+  /** Auth mode for job status endpoints. Default: "bearerAuth". */
+  auth?: "bearerAuth" | "userAuth" | "none";
+  /** Whitelist of queue names exposed. Default: [] (nothing exposed). */
+  allowedQueues?: string[];
+  /** When auth is "userAuth", restrict job visibility to the user who created it. Default: false. */
+  scopeToUser?: boolean;
+}
+
+export interface TenantConfig {
+  [key: string]: unknown;
+}
+
+export interface TenancyConfig {
+  /** How tenant is identified. */
+  resolution: "header" | "subdomain" | "path";
+  /** Header name when resolution is "header". Default: "x-tenant-id". */
+  headerName?: string;
+  /** Path segment index when resolution is "path". Default: 0. */
+  pathSegment?: number;
+  /** Callback to validate/load tenant. Return null to reject. */
+  onResolve?: (tenantId: string) => Promise<TenantConfig | null>;
+  /** TTL in ms for caching onResolve results (LRU cache). Default: 60_000. Set 0 to disable. */
+  cacheTtlMs?: number;
+  /** Max entries in tenant resolution cache. Default: 500. */
+  cacheMaxSize?: number;
+  /** Paths that skip tenant resolution. Uses startsWith matching. Default: ["/health", "/docs", "/openapi.json"]. */
+  exemptPaths?: string[];
+  /** HTTP status when onResolve returns null. Default: 403. */
+  rejectionStatus?: 403 | 404;
+}
+
 export interface CreateAppConfig {
   /** Absolute path to the service's routes directory (use import.meta.dir + "/routes") */
   routesDir: string;
@@ -278,6 +312,10 @@ export interface CreateAppConfig {
   middleware?: MiddlewareHandler<AppEnv>[];
   /** Database connection and store routing configuration */
   db?: DbConfig;
+  /** Job status endpoint configuration. Requires BullMQ + Redis. */
+  jobs?: JobsConfig;
+  /** Multi-tenancy configuration. When set, tenant middleware resolves tenant on each request. */
+  tenancy?: TenancyConfig;
 }
 
 export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<AppEnv>> => {
@@ -423,6 +461,13 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
     });
   }
   app.use(identify);
+
+  // Tenant resolution middleware (after identify, before user middleware + routes)
+  if (config.tenancy) {
+    const { createTenantMiddleware } = await import("@middleware/tenant");
+    app.use(createTenantMiddleware(config.tenancy));
+  }
+
   for (const mw of middleware) app.use(mw);
 
   setAppName(appName);
@@ -473,6 +518,7 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
     if (file === "auth.ts") continue; // mounted separately below via createAuthRouter
     if (file === "oauth.ts") continue; // mounted separately below
     if (file === "mfa.ts") continue;   // mounted separately below when mfa is configured
+    if (file === "jobs.ts") continue;  // mounted separately below when jobs.statusEndpoint is true
     const mod = await import(`${coreRoutesDir}/${file}`);
     if (mod.router) app.route("/", mod.router);
   }
@@ -495,6 +541,11 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
     }
     const { createMfaRouter } = await import(`${coreRoutesDir}/mfa`);
     app.route("/", createMfaRouter());
+  }
+
+  if (config.jobs?.statusEndpoint) {
+    const { createJobsRouter } = await import(`${coreRoutesDir}/jobs`);
+    app.route("/", createJobsRouter(config.jobs));
   }
 
   // Service routes — collect all, sort by optional exported `priority`, then mount

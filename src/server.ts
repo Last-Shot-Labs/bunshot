@@ -82,6 +82,14 @@ export const createServer = async <T extends object = object>(
     for await (const file of glob.scan({ cwd: workersDir })) {
       await import(`${workersDir}/${file}`);
     }
+    // Clean up ghost cron schedulers after all workers are loaded
+    try {
+      const { getRegisteredCronNames, cleanupStaleSchedulers } = await import("@lib/queue");
+      const activeNames = [...getRegisteredCronNames()];
+      if (activeNames.length > 0) {
+        await cleanupStaleSchedulers(activeNames);
+      }
+    } catch { /* bullmq not installed or no cron workers */ }
   }
 
   log(`[server] running at http://localhost:${server.port}`);

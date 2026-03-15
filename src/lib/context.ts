@@ -4,6 +4,8 @@ export type AppVariables = {
   authUserId: string | null;
   roles: string[] | null;
   sessionId: string | null;
+  tenantId: string | null;
+  tenantConfig: Record<string, unknown> | null;
 };
 
 export type AppEnv = { Variables: AppVariables };
