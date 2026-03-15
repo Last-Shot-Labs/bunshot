@@ -42,7 +42,9 @@ This is a **Bun + Hono API framework library** that consuming projects install a
 
 **Worker auto-discovery:** BullMQ workers are placed in a `workers/` directory and auto-started by `createServer`.
 
-**Auth flow:** `src/services/auth.ts` orchestrates login/register/logout. The auth store is pluggable via `AuthAdapter` interface (default: `src/adapters/mongoAuth.ts`). Sessions can be stored in Redis, MongoDB, SQLite, or memory — configured via `db.sessions` in `CreateAppConfig`. Each login creates an independent session (keyed by UUID `sessionId` embedded in the JWT as the `sid` claim), so multiple devices stay logged in simultaneously. Session concurrency, metadata persistence, and `lastActiveAt` tracking are controlled via `auth.sessionPolicy`. Login identifier is configurable via `auth.primaryField` (`"email"` | `"username"` | `"phone"`). Email verification is opt-in via `auth.emailVerification` (supports `required: true` to block login until verified, `tokenExpiry` in seconds to control token TTL — defaults to 24 hours). Password reset is opt-in via `auth.passwordReset` (`onSend` callback receives email + token; `tokenExpiry` in seconds — defaults to 1 hour); mounts `POST /auth/forgot-password` and `POST /auth/reset-password`, both rate-limited by IP.
+**Auth flow:** `src/services/auth.ts` orchestrates login/register/logout. The auth store is pluggable via `AuthAdapter` interface (default: `src/adapters/mongoAuth.ts`). Sessions can be stored in Redis, MongoDB, SQLite, or memory — configured via `db.sessions` in `CreateAppConfig`. Each login creates an independent session (keyed by UUID `sessionId` embedded in the JWT as the `sid` claim), so multiple devices stay logged in simultaneously. Session concurrency, metadata persistence, and `lastActiveAt` tracking are controlled via `auth.sessionPolicy`. Login identifier is configurable via `auth.primaryField` (`"email"` | `"username"` | `"phone"`). Email verification is opt-in via `auth.emailVerification` (supports `required: true` to block login until verified, `tokenExpiry` in seconds to control token TTL — defaults to 24 hours). Password reset is opt-in via `auth.passwordReset` (`onSend` callback receives email + token; `tokenExpiry` in seconds — defaults to 1 hour); mounts `POST /auth/forgot-password` and `POST /auth/reset-password`, both rate-limited by IP. Refresh tokens are opt-in via `auth.refreshTokens` — configures short-lived access tokens + long-lived refresh tokens with rotation and grace window for theft detection. MFA/TOTP is opt-in via `auth.mfa` — enables setup/verify/disable routes under `/auth/mfa/*`; login returns `{ mfaRequired, mfaToken }` when MFA is enabled; OAuth logins skip MFA. Account deletion is opt-in via `auth.accountDeletion` — enables `DELETE /auth/me` with lifecycle hooks and optional queued deletion via BullMQ.
+
+**Multi-tenancy:** Opt-in via `tenancy` config in `CreateAppConfig`. The tenant middleware resolves tenant ID via header, subdomain, or path segment, validates via `onResolve` callback (with LRU cache), and attaches `tenantId` + `tenantConfig` to context. Auth routes are exempt (auth is global). Rate limits and cache keys are automatically namespaced per-tenant. Tenant-scoped roles are supported via `requireRole` (checks tenant roles when tenant context exists, falls back to app-wide roles otherwise). Provisioning helpers: `createTenant`, `deleteTenant`, `getTenant`, `listTenants` (MongoDB-backed).
 
 **Context extension:** The framework exposes a typed `AppContext` (Hono `Context`) that consuming apps extend with their own variables.
 
@@ -53,12 +55,16 @@ This is a **Bun + Hono API framework library** that consuming projects install a
 | `mongo.ts` | Mongoose connection management; `disconnectMongo()` for clean shutdown |
 | `redis.ts` | ioredis client; `disconnectRedis()` for clean shutdown |
 | `jwt.ts` | `jose`-based JWT sign/verify |
-| `session.ts` | Multi-session CRUD — keyed by `sessionId` UUID; captures IP/UA metadata; enforces `maxSessions` with oldest-first eviction; exposes `getUserSessions`, `getActiveSessionCount`, `evictOldestSession`, `updateSessionLastActive`; store set via `db.sessions` ("redis" \| "mongo" \| "sqlite" \| "memory") |
+| `session.ts` | Multi-session CRUD — keyed by `sessionId` UUID; captures IP/UA metadata; enforces `maxSessions` with oldest-first eviction; exposes `getUserSessions`, `getActiveSessionCount`, `evictOldestSession`, `updateSessionLastActive`; refresh token support (`setRefreshToken`, `getSessionByRefreshToken`, `rotateRefreshToken`); store set via `db.sessions` ("redis" \| "mongo" \| "sqlite" \| "memory") |
 | `auth.ts` | Register/login/logout/password logic |
 | `oauth.ts` | OAuth provider coordination via `arctic` — state store set via `db.oauthState` |
 | `cache.ts` | Response cache — default store set via `db.cache`, overridable per-route; exports `bustCache` (all stores) and `bustCachePattern` (wildcard invalidation) |
 | `rateLimit.ts` | Per-key rate limiting; exports `trackAttempt`, `isLimited`, `bustAuthLimit` for use in custom routes |
 | `resetPassword.ts` | Password reset token CRUD — `createResetToken`, `consumeResetToken`; 4-backend (redis/mongo/sqlite/memory); store set via `setPasswordResetStore` |
+| `mfaChallenge.ts` | MFA challenge token CRUD — `createMfaChallenge`, `consumeMfaChallenge`; 4-backend (redis/mongo/sqlite/memory); configurable TTL |
+| `tenant.ts` | Tenant provisioning helpers — `createTenant`, `deleteTenant`, `getTenant`, `listTenants`; MongoDB-backed via `Tenant` model on `authConnection` |
+| `roles.ts` | App-wide + tenant-scoped role helpers — `setUserRoles`, `addUserRole`, `removeUserRole`, `getTenantRoles`, `setTenantRoles`, `addTenantRole`, `removeTenantRole` |
+| `queue.ts` | BullMQ factory helpers — `createQueue`, `createWorker`, `createCronWorker`, `createDLQHandler`, `cleanupStaleSchedulers` |
 | `ws.ts` | WebSocket room registry, pub/sub helpers (`publish`, `subscribe`, `unsubscribe`, `getSubscriptions`, `handleRoomActions`, `getRooms`, `getRoomSubscribers`) — in-memory, no DB dependency |
 | `createRoute.ts` | Wraps `@hono/zod-openapi`'s `createRoute` to auto-register unnamed request/response schemas as named OpenAPI components; also exports `withSecurity` (adds security after type inference), `registerSchema` (single explicit registration), `registerSchemas` (batch registration), and `maybeAutoRegister` (internal, used by `modelSchemas` discovery in `createApp`); all public exports re-exported from the package |
 
@@ -67,10 +73,11 @@ This is a **Bun + Hono API framework library** that consuming projects install a
 - `bearerAuth` — API key validation via `Authorization: Bearer` header
 - `identify` — Reads `sid` claim from JWT, looks up session by sessionId, attaches `authUserId` and `sessionId` to context (non-blocking); optionally calls `updateSessionLastActive` when `auth.sessionPolicy.trackLastActive` is true
 - `userAuth` — Requires authenticated user (blocks if not logged in)
-- `requireRole` — RBAC role enforcement
+- `requireRole` — RBAC role enforcement; tenant-aware (checks tenant-scoped roles when `tenantId` is in context, falls back to app-wide roles); `requireRole.global(...)` always checks app-wide roles
 - `requireVerifiedEmail` — Blocks access for users whose email has not been verified (requires `getEmailVerified` on adapter)
-- `rateLimit` — Request rate limiting
-- `cacheResponse` — Response caching with TTL
+- `rateLimit` — Request rate limiting; per-tenant namespaced when tenant context is present
+- `cacheResponse` — Response caching with TTL; per-tenant namespaced when tenant context is present
+- `tenant` — Tenant resolution middleware; resolves tenant ID from header/subdomain/path, validates via `onResolve` (with LRU cache), attaches `tenantId` + `tenantConfig` to context; exempt paths skip resolution
 
 ### Adapters (`src/adapters/`)
 
@@ -82,8 +89,10 @@ This is a **Bun + Hono API framework library** that consuming projects install a
 
 ### Built-in Routes (`src/routes/`)
 
-- `auth.ts` — `/auth/register`, `/auth/login`, `/auth/logout`, `/auth/set-password`, `/auth/me`, `/auth/sessions` (GET list + DELETE by sessionId), `/auth/verify-email`, `/auth/resend-verification`, `/auth/forgot-password` (when `passwordReset` configured), `/auth/reset-password` (when `passwordReset` configured)
+- `auth.ts` — `/auth/register`, `/auth/login`, `/auth/logout`, `/auth/set-password`, `/auth/me`, `DELETE /auth/me` (account deletion), `/auth/sessions` (GET list + DELETE by sessionId), `/auth/verify-email`, `/auth/resend-verification`, `/auth/forgot-password` (when `passwordReset` configured), `/auth/reset-password` (when `passwordReset` configured), `POST /auth/refresh` (when `refreshTokens` configured), `POST /auth/cancel-deletion` (when queued deletion configured)
 - `oauth.ts` — OAuth initiation (`GET /auth/{provider}`), callbacks, link (`GET /auth/{provider}/link`), and unlink (`DELETE /auth/{provider}/link`) handlers
+- `mfa.ts` — MFA routes (when `auth.mfa` configured): `POST /auth/mfa/setup`, `POST /auth/mfa/verify-setup`, `POST /auth/mfa/verify`, `DELETE /auth/mfa`, `POST /auth/mfa/recovery-codes`
+- `jobs.ts` — Job status routes (when `jobs.statusEndpoint` is true): `GET /jobs/:queue/:id`, `GET /jobs/:queue/:id/logs`, `GET /jobs/:queue/dead-letters`
 - `health.ts` — Health check
 - `home.ts` — Root endpoint
 

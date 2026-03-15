@@ -195,7 +195,7 @@ Every field above is optional except `routesDir`. See the [Configuration](#confi
 | `GET /auth/sessions` | List active sessions with metadata — IP, user-agent, timestamps (requires login) |
 | `DELETE /auth/sessions/:sessionId` | Revoke a specific session by ID (requires login) |
 | `POST /auth/verify-email` | Verify email with token (when `emailVerification` is configured) |
-| `POST /auth/resend-verification` | Resend verification email (requires login, when `emailVerification` is configured) |
+| `POST /auth/resend-verification` | Resend verification email (requires credentials, when `emailVerification` is configured) |
 | `POST /auth/forgot-password` | Request a password reset email (when `passwordReset` is configured) |
 | `POST /auth/reset-password` | Reset password using a token from the reset email (when `passwordReset` is configured) |
 | `GET /health` | Health check |
@@ -628,6 +628,72 @@ export const notifyWorker = createWorker<NotifyJob>("notify", async (job) => {
 ```
 
 `publish` is available after `createServer` resolves. Workers are loaded after that point, so it's always safe to use inside a worker.
+
+### Cron / scheduled workers
+
+Use `createCronWorker` for recurring jobs. It creates both a queue and worker, and uses BullMQ's `upsertJobScheduler` for idempotent scheduling across restarts.
+
+```ts
+// src/workers/cleanup.ts
+import { createCronWorker } from "@lastshotlabs/bunshot/queue";
+
+export const { worker, queue } = createCronWorker(
+  "cleanup",
+  async (job) => {
+    // runs every hour
+    await deleteExpiredRecords();
+  },
+  { cron: "0 * * * *" }         // or { every: 3_600_000 } for interval-based
+);
+```
+
+**Ghost job cleanup**: When a cron worker is renamed or removed, the old scheduler persists in Redis. Bunshot handles this automatically — after all workers in `workersDir` are loaded, stale schedulers are pruned. For workers managed outside `workersDir`, call `cleanupStaleSchedulers(activeNames)` manually.
+
+### Job status endpoint
+
+Expose job state via REST for client-side polling (e.g., long-running uploads or exports):
+
+```ts
+await createServer({
+  jobs: {
+    statusEndpoint: true,              // default: false
+    auth: "bearerAuth",                // "bearerAuth" | "userAuth" | "none", default: "bearerAuth"
+    allowedQueues: ["export", "upload"], // whitelist — empty = nothing exposed (secure by default)
+    scopeToUser: false,                // when true with "userAuth", users only see their own jobs
+  },
+});
+```
+
+#### Endpoints
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /jobs/:queue/:id` | Job state, progress, result, or failure reason |
+| `GET /jobs/:queue/:id/logs` | Job logs |
+| `GET /jobs/:queue/dead-letters` | Paginated list of DLQ jobs |
+
+### Dead Letter Queue (DLQ)
+
+Automatically move permanently failed jobs to a DLQ for inspection and retry:
+
+```ts
+import { createWorker, createDLQHandler } from "@lastshotlabs/bunshot/queue";
+
+const emailWorker = createWorker("email", async (job) => { ... });
+
+const { dlqQueue, retryJob } = createDLQHandler(emailWorker, "email", {
+  maxSize: 1000,                                    // default: 1000 — oldest trimmed when exceeded
+  onDeadLetter: async (job, error) => {              // optional alerting callback
+    await alertSlack(`Job ${job.id} failed: ${error.message}`);
+  },
+  preserveJobOptions: true,                          // default: true — retry with original delay/priority/attempts
+});
+
+// Retry a specific failed job
+await retryJob("job-id-123");
+```
+
+The DLQ queue is named `${sourceQueueName}-dlq` (e.g., `email-dlq`). It's automatically available via the job status endpoint if listed in `allowedQueues`.
 
 ---
 
@@ -1109,6 +1175,39 @@ await createServer({
       providers: { google: { ... }, apple: { ... } }, // omit a provider to disable it
       postRedirect: "/dashboard",           // default: "/"
     },
+    refreshTokens: {                        // optional — short-lived access + long-lived refresh tokens
+      accessTokenExpiry: 900,               // default: 900 (15 min)
+      refreshTokenExpiry: 2_592_000,        // default: 2_592_000 (30 days)
+      rotationGraceSeconds: 30,             // default: 30 — old token still works briefly after rotation
+    },
+    mfa: {                                  // optional — TOTP/MFA support (requires otpauth peer dep)
+      issuer: "My App",                     // shown in authenticator apps (default: app name)
+      recoveryCodes: 10,                    // default: 10
+      challengeTtlSeconds: 300,             // default: 300 (5 min)
+    },
+    accountDeletion: {                      // optional — enables DELETE /auth/me
+      onBeforeDelete: async (userId) => {}, // throw to abort
+      onAfterDelete: async (userId) => {},  // cleanup callback
+    },
+  },
+
+  // Multi-tenancy
+  tenancy: {
+    resolution: "header",                   // "header" | "subdomain" | "path"
+    headerName: "x-tenant-id",             // header name (when resolution is "header")
+    onResolve: async (tenantId) => ({}),    // validate/load tenant — return null to reject
+    cacheTtlMs: 60_000,                    // LRU cache TTL (default: 60s, 0 to disable)
+    cacheMaxSize: 500,                     // max cached entries (default: 500)
+    exemptPaths: [],                       // extra paths that skip tenant resolution
+    rejectionStatus: 403,                  // 403 (default) or 404
+  },
+
+  // Job status endpoint
+  jobs: {
+    statusEndpoint: true,                  // default: false
+    auth: "bearerAuth",                    // "bearerAuth" | "userAuth" | "none"
+    allowedQueues: ["export"],             // whitelist — empty = nothing exposed
+    scopeToUser: false,                    // when true with "userAuth", users see only their own jobs
   },
 
   // Security
@@ -1260,6 +1359,124 @@ Session metadata (IP address, user-agent, timestamps) is persisted even after a 
 
 Set `sessionPolicy.includeInactiveSessions: true` to surface expired/deleted sessions in `GET /auth/sessions` with `isActive: false` — useful for a full device-history UI similar to Google or Meta's account security page.
 
+#### Sliding sessions
+
+Set `sessionPolicy.trackLastActive: true` to update `lastActiveAt` on every authenticated request. This adds one DB write per request but enables a sliding-session experience — sessions that are actively used stay fresh. Pair with refresh tokens (below) for true sliding behavior: short-lived access tokens (15 min) keep authorization tight, while a long-lived refresh token (30 days) lets the client silently renew without re-entering credentials.
+
+### Refresh Tokens
+
+When configured, login and register return short-lived access tokens (default 15 min) alongside long-lived refresh tokens (default 30 days). The client uses `POST /auth/refresh` to obtain a new access token when the current one expires.
+
+```ts
+await createServer({
+  auth: {
+    refreshTokens: {
+      accessTokenExpiry: 900,        // seconds, default: 900 (15 min)
+      refreshTokenExpiry: 2_592_000, // seconds, default: 2_592_000 (30 days)
+      rotationGraceSeconds: 30,      // default: 30 — old token still works briefly after rotation
+    },
+  },
+});
+```
+
+**When not configured**, the existing 7-day JWT behavior is unchanged — fully backward compatible.
+
+#### Endpoints
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /auth/login` | Returns `token` + `refreshToken` |
+| `POST /auth/register` | Returns `token` + `refreshToken` |
+| `POST /auth/refresh` | Rotates refresh token, returns new `token` + `refreshToken` |
+
+#### Rotation with grace window
+
+On each refresh, the server generates a new refresh token but keeps the old one valid for `rotationGraceSeconds` (default 30s). If the client's network drops mid-refresh, it can safely retry with the old token. If the old token is reused *after* the grace window, the entire session is invalidated — this is token-family theft detection.
+
+#### Cookie behavior
+
+The refresh token is set as an `HttpOnly` cookie (`refresh_token`) alongside the existing session cookie. For non-browser clients, it's also returned in the JSON body and accepted via the `x-refresh-token` header.
+
+### MFA / TOTP
+
+Enable multi-factor authentication with TOTP (Google Authenticator, Authy, etc.):
+
+```ts
+await createServer({
+  auth: {
+    mfa: {
+      issuer: "My App",          // shown in authenticator apps (default: app name)
+      algorithm: "SHA1",         // default, most compatible
+      digits: 6,                 // default
+      period: 30,                // seconds, default
+      recoveryCodes: 10,         // number of recovery codes, default: 10
+      challengeTtlSeconds: 300,  // MFA challenge window, default: 5 min
+    },
+  },
+});
+```
+
+Requires `otpauth` peer dependency:
+
+```bash
+bun add otpauth
+```
+
+#### Endpoints
+
+| Endpoint | Auth | Purpose |
+|---|---|---|
+| `POST /auth/mfa/setup` | userAuth | Generate TOTP secret + otpauth URI (for QR code) |
+| `POST /auth/mfa/verify-setup` | userAuth | Confirm with TOTP code, returns recovery codes |
+| `POST /auth/mfa/verify` | none (uses mfaToken) | Complete login after password verified |
+| `DELETE /auth/mfa` | userAuth | Disable MFA (requires TOTP code) |
+| `POST /auth/mfa/recovery-codes` | userAuth | Regenerate codes (requires TOTP code) |
+
+#### Login flow with MFA enabled
+
+1. `POST /auth/login` with credentials → password OK + MFA enabled → `{ mfaRequired: true, mfaToken: "..." }` (no session created)
+2. `POST /auth/mfa/verify` with `{ mfaToken, code }` → verifies TOTP or recovery code → creates session → returns normal token response
+
+**OAuth logins skip MFA** — the OAuth provider is treated as the second factor.
+
+**Recovery codes**: 10 random 8-character alphanumeric codes, stored as SHA-256 hashes. Each code can only be used once.
+
+### Account Deletion
+
+Enable `DELETE /auth/me` for user-initiated account deletion:
+
+```ts
+await createServer({
+  auth: {
+    accountDeletion: {
+      onBeforeDelete: async (userId) => {
+        // Throw to abort (e.g., check for active subscription)
+      },
+      onAfterDelete: async (userId) => {
+        // Cleanup: delete S3 files, cancel Stripe, etc.
+        // Runs at execution time — query current state, not a snapshot
+      },
+      queued: false,           // set true for async deletion via BullMQ
+      gracePeriod: 0,          // seconds before queued deletion executes
+      onDeletionScheduled: async (userId, email, cancelToken) => {
+        // Send cancellation email with cancelToken link
+      },
+    },
+  },
+});
+```
+
+#### Behavior
+
+- Requires `userAuth` middleware (user must be logged in)
+- Body: `{ password?: string }` — required for credential accounts, skipped for OAuth-only
+- Revokes all sessions, deletes tokens, calls `adapter.deleteUser(userId)`
+- Rate limited (3/hour by userId)
+
+#### Queued deletion
+
+When `queued: true`, deletion is enqueued as a BullMQ job instead of running synchronously. The endpoint returns `202 Accepted` immediately. With `gracePeriod > 0`, the user can cancel via `POST /auth/cancel-deletion`.
+
 ### Protecting routes
 
 ```ts
@@ -1361,7 +1578,7 @@ All built-in auth endpoints are rate-limited out of the box with sensible defaul
 | `POST /auth/login` | identifier (email/username/phone) | **Failures only** — reset on success | 10 failures / 15 min |
 | `POST /auth/register` | IP address | Every attempt | 5 / hour |
 | `POST /auth/verify-email` | IP address | Every attempt | 10 / 15 min |
-| `POST /auth/resend-verification` | User ID (authenticated) | Every attempt | 3 / hour |
+| `POST /auth/resend-verification` | Identifier (email/username/phone) | Every attempt | 3 / hour |
 | `POST /auth/forgot-password` | IP address | Every attempt | 5 / 15 min |
 | `POST /auth/reset-password` | IP address | Every attempt | 10 / 15 min |
 
@@ -1631,6 +1848,101 @@ const myAdapter: AuthAdapter = {
 };
 ```
 
+### Tenant-scoped roles
+
+When multi-tenancy is enabled (see below), `requireRole` automatically checks **tenant-scoped roles** instead of app-wide roles when a `tenantId` is present in the request context.
+
+```ts
+// Assign a tenant-scoped role
+import { addTenantRole, setTenantRoles, removeTenantRole, getTenantRoles } from "@lastshotlabs/bunshot";
+
+await addTenantRole(userId, "acme", "admin");
+await setTenantRoles(userId, "acme", ["admin", "editor"]);
+await removeTenantRole(userId, "acme", "editor");
+const roles = await getTenantRoles(userId, "acme"); // ["admin"]
+```
+
+`requireRole("admin")` checks tenant-scoped roles when `tenantId` is in context, and falls back to app-wide roles when there is no tenant context. Use `requireRole.global("superadmin")` to always check app-wide roles regardless of tenant.
+
+```ts
+router.use("/tenant-admin", userAuth, requireRole("admin"));           // checks tenant roles when in tenant context
+router.use("/super-admin", userAuth, requireRole.global("superadmin")); // always checks app-wide roles
+```
+
+If you're using a custom `authAdapter`, implement the tenant role methods:
+
+| Method | Purpose |
+|---|---|
+| `getTenantRoles(userId, tenantId)` | Required for tenant-scoped `requireRole` |
+| `setTenantRoles(userId, tenantId, roles)` | Full replace |
+| `addTenantRole(userId, tenantId, role)` | Granular addition |
+| `removeTenantRole(userId, tenantId, role)` | Granular removal |
+
+---
+
+## Multi-Tenancy
+
+Add multi-tenancy to your app by configuring tenant resolution. Bunshot resolves the tenant on each request and attaches `tenantId` + `tenantConfig` to the Hono context.
+
+```ts
+await createServer({
+  tenancy: {
+    resolution: "header",               // "header" | "subdomain" | "path"
+    headerName: "x-tenant-id",          // default for "header" strategy
+    onResolve: async (tenantId) => {     // validate + load tenant config — return null to reject
+      const tenant = await getTenant(tenantId);
+      return tenant?.config ?? null;
+    },
+    cacheTtlMs: 60_000,                 // LRU cache TTL for onResolve (default: 60s, 0 to disable)
+    cacheMaxSize: 500,                  // max cached entries (default: 500)
+    exemptPaths: ["/webhooks"],          // additional paths that skip tenant resolution
+    rejectionStatus: 403,               // 403 (default) or 404 when onResolve returns null
+  },
+});
+```
+
+### Resolution strategies
+
+| Strategy | How it extracts tenant ID | Example |
+|---|---|---|
+| `"header"` | From request header (default `x-tenant-id`) | `x-tenant-id: acme` |
+| `"subdomain"` | From first subdomain | `acme.myapp.com` → `"acme"` |
+| `"path"` | From URL path segment (does **not** strip prefix) | `/acme/api/users` → `"acme"` |
+
+### Default exempt paths
+
+These paths skip tenant resolution by default: `/health`, `/docs`, `/openapi.json`, `/auth/` (auth is global — all tenants share a user pool). Add more via `exemptPaths`.
+
+### Accessing tenant in routes
+
+```ts
+router.openapi(myRoute, async (c) => {
+  const tenantId = c.get("tenantId");         // string | null
+  const tenantConfig = c.get("tenantConfig"); // Record<string, unknown> | null
+  // Filter queries by tenantId, apply tenant-specific settings, etc.
+});
+```
+
+### Tenant provisioning helpers
+
+CRUD utilities for managing tenants (stored in the auth database via MongoDB):
+
+```ts
+import { createTenant, getTenant, listTenants, deleteTenant } from "@lastshotlabs/bunshot";
+
+await createTenant("acme", { displayName: "Acme Corp", config: { maxUsers: 100 } });
+const tenant = await getTenant("acme");      // { tenantId, displayName, config, createdAt }
+const all = await listTenants();             // active tenants only
+await deleteTenant("acme");                  // soft-delete + invalidates resolution cache
+```
+
+### Per-tenant namespacing
+
+When tenant context is present, rate limits and cache keys are automatically namespaced per-tenant — no code changes needed. Each tenant gets independent rate limit buckets and cache entries.
+
+- Rate limit keys: `t:${tenantId}:ip:${ip}` (instead of `ip:${ip}`)
+- Cache keys: `cache:${appName}:${tenantId}:${key}` (instead of `cache:${appName}:${key}`)
+
 ---
 
 ## Social Login (OAuth)
@@ -1785,6 +2097,9 @@ bun add ioredis
 
 # Background job queues
 bun add bullmq
+
+# MFA / TOTP
+bun add otpauth
 ```
 
 | Package | Required version | When you need it |
@@ -1792,6 +2107,7 @@ bun add bullmq
 | `mongoose` | `>=9.0 <10` | `db.auth: "mongo"`, `db.sessions: "mongo"`, or `db.cache: "mongo"` |
 | `ioredis` | `>=5.0 <6` | `db.redis: true` (the default), or any store set to `"redis"` |
 | `bullmq` | `>=5.0 <6` | Workers / queues |
+| `otpauth` | `>=9.0 <10` | `auth.mfa` configuration |
 
 If you're running fully on SQLite or memory (no Redis, no MongoDB), none of the optional peers are needed.
 
@@ -1889,24 +2205,34 @@ import {
   // Auth utilities
   signToken, verifyToken,
   createSession, getSession, deleteSession, getUserSessions, getActiveSessionCount,
-  evictOldestSession, updateSessionLastActive, setSessionStore,
+  evictOldestSession, updateSessionLastActive, setSessionStore, deleteUserSessions,
+  setRefreshToken, getSessionByRefreshToken, rotateRefreshToken,  // refresh token management
   createVerificationToken, getVerificationToken, deleteVerificationToken,  // email verification tokens
+  createResetToken, consumeResetToken, setPasswordResetStore,              // password reset tokens
+  createMfaChallenge, consumeMfaChallenge, setMfaChallengeStore,           // MFA challenge tokens
   bustAuthLimit, trackAttempt, isLimited,          // auth rate limiting — use in custom routes or admin unlocks
   buildFingerprint,                                // HTTP fingerprint hash (IP-independent) — use in custom bot detection logic
-  AuthUser, mongoAuthAdapter,
   sqliteAuthAdapter, setSqliteDb, startSqliteCleanup,  // SQLite backend (persisted)
   memoryAuthAdapter, clearMemoryStore,                 // in-memory backend (ephemeral)
-  setUserRoles, addUserRole, removeUserRole,       // role management
+  setUserRoles, addUserRole, removeUserRole,       // app-wide role management
+  getTenantRoles, setTenantRoles, addTenantRole, removeTenantRole, // tenant-scoped role management
   type AuthAdapter, type OAuthProfile, type OAuthProviderConfig,
   type AuthRateLimitConfig, type BotProtectionConfig, type BotProtectionOptions,
   type LimitOpts, type RateLimitOptions,
+  type SessionMetadata, type SessionInfo, type RefreshResult,
+
+  // Tenancy
+  createTenant, deleteTenant, getTenant, listTenants,  // tenant provisioning (MongoDB)
+  invalidateTenantCache,                               // invalidate LRU cache entry
+  type TenantInfo, type CreateTenantOptions,
+  type TenancyConfig, type TenantConfig,
 
   // Middleware
   bearerAuth, identify, userAuth, rateLimit,
   botProtection,                                  // CIDR blocklist + per-route bot protection
-  requireRole,                                    // role-based access control
+  requireRole,                                    // role-based access control (tenant-aware)
   requireVerifiedEmail,                           // blocks unverified email addresses
-  cacheResponse, bustCache, bustCachePattern, setCacheStore,  // response caching
+  cacheResponse, bustCache, bustCachePattern, setCacheStore,  // response caching (tenant-namespaced)
 
   // Utilities
   HttpError, log, validate, createRouter, createRoute,
@@ -1918,12 +2244,23 @@ import {
 
   // Constants
   COOKIE_TOKEN, HEADER_USER_TOKEN,
+  COOKIE_REFRESH_TOKEN, HEADER_REFRESH_TOKEN,     // refresh token cookie/header names
 
   // Types
   type AppEnv, type AppVariables,
   type CreateServerConfig, type CreateAppConfig, type ModelSchemasConfig,
   type DbConfig, type AppMeta, type AuthConfig, type OAuthConfig, type SecurityConfig,
-  type PrimaryField, type EmailVerificationConfig,
+  type PrimaryField, type EmailVerificationConfig, type PasswordResetConfig,
+  type RefreshTokenConfig, type MfaConfig, type JobsConfig,
+  type AccountDeletionConfig,
   type SocketData, type WsConfig,
 } from "@lastshotlabs/bunshot";
+
+// Jobs (separate entrypoint)
+import {
+  createQueue, createWorker,
+  createCronWorker, cleanupStaleSchedulers, getRegisteredCronNames,
+  createDLQHandler,
+  type Job,
+} from "@lastshotlabs/bunshot/queue";
 ```
