@@ -80,14 +80,10 @@ describe("SQLite email verification", () => {
   });
 
   test("resend verification sends new token", async () => {
-    const reg = await app.request("/auth/register", json({ email: "ev5@example.com", password: "password123" }));
-    const { token } = await reg.json();
+    await app.request("/auth/register", json({ email: "ev5@example.com", password: "password123" }));
     captured.length = 0;
 
-    const res = await app.request("/auth/resend-verification", {
-      method: "POST",
-      headers: authHeader(token),
-    });
+    const res = await app.request("/auth/resend-verification", json({ email: "ev5@example.com", password: "password123" }));
     expect(res.status).toBe(200);
     expect(captured).toHaveLength(1);
   });

@@ -29,7 +29,7 @@ beforeEach(() => {
   const db = getDb();
   db.run("DELETE FROM users");
   db.run("DELETE FROM sessions");
-  db.run("DELETE FROM mfa_challenges");
+  try { db.run("DELETE FROM mfa_challenges"); } catch { /* table may not exist yet */ }
   clearMemoryStore();
 });
 

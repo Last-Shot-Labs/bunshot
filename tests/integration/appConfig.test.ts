@@ -23,15 +23,20 @@ describe("bearerAuth enabled", () => {
     clearMemoryStore();
   });
 
-  test("request without bearer token returns 401", async () => {
-    const res = await app.request("/health");
+  test("request without bearer token returns 401 on non-exempt path", async () => {
+    const res = await app.request("/cached");
     expect(res.status).toBe(401);
   });
 
   test("request with valid bearer token passes", async () => {
-    const res = await app.request("/health", {
+    const res = await app.request("/cached", {
       headers: { Authorization: "Bearer test-bearer-token" },
     });
+    expect(res.status).toBe(200);
+  });
+
+  test("exempt paths bypass bearer auth", async () => {
+    const res = await app.request("/health");
     expect(res.status).toBe(200);
   });
 });
