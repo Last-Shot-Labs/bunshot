@@ -46,6 +46,7 @@ export type { RateLimitOptions } from "@middleware/rateLimit";
 export { userAuth } from "@middleware/userAuth";
 export { requireRole } from "@middleware/requireRole";
 export { requireVerifiedEmail } from "@middleware/requireVerifiedEmail";
+export { requireMfaSetup } from "@middleware/requireMfaSetup";
 export { csrfProtection, refreshCsrfToken, clearCsrfToken } from "@middleware/csrf";
 export type { CsrfMiddlewareOptions } from "@middleware/csrf";
 export { cacheResponse, bustCache, bustCachePattern, setCacheStore, getCacheModel } from "@middleware/cacheResponse";

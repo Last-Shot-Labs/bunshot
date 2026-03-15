@@ -588,6 +588,11 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
 
   for (const mw of middleware) app.use(mw);
 
+  if (authConfig.mfa?.required) {
+    const { requireMfaSetup } = await import("@middleware/requireMfaSetup");
+    app.use(requireMfaSetup);
+  }
+
   setAppName(appName);
 
   // Schema pre-loading — import shared schema files before routes so registerSchema /

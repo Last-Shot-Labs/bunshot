@@ -109,6 +109,44 @@ The verify endpoint accepts an optional `method` field (`"totp"` or `"emailOtp"`
 
 **Recovery codes**: 10 random 8-character alphanumeric codes, stored as SHA-256 hashes. Each code can only be used once. Enabling a second MFA method regenerates recovery codes — save the new set.
 
+#### Enforcing MFA for all users
+
+By default MFA is opt-in — individual users choose whether to enable it. Set `required: true` to enforce MFA at the app level:
+
+```ts
+await createServer({
+  auth: {
+    mfa: {
+      issuer: "My App",
+      required: true, // all authenticated users must complete MFA setup
+    },
+  },
+});
+```
+
+When `required` is `true`:
+
+- Authenticated users who have **not** completed MFA setup receive a `403` response on all non-auth endpoints:
+  ```json
+  { "error": "MFA setup required", "code": "MFA_SETUP_REQUIRED" }
+  ```
+- **Exempt paths** remain accessible so users can complete setup: all `/auth/*` routes (login, logout, register, MFA setup, OAuth, sessions), `/health`, `/docs`, `/openapi.json`, and the root `/`.
+- **Unauthenticated requests** pass through normally — the middleware only gates users who are logged in but lack MFA.
+- **OAuth users** must also set up MFA — OAuth login creates a session, but the user is still blocked from service endpoints until MFA is configured.
+- **Disabling MFA** (via `DELETE /auth/mfa`) when `required: true` immediately blocks the user from service endpoints until they re-enable it.
+
+**Client-side handling:** Check for the `MFA_SETUP_REQUIRED` code in 403 responses and redirect users to an MFA setup page that calls `POST /auth/mfa/setup`.
+
+**Per-route usage:** The `requireMfaSetup` middleware is also exported for apps that want manual, per-route enforcement instead of global:
+
+```ts
+import { userAuth, requireMfaSetup } from "@lastshotlabs/bunshot";
+
+router.get("/dashboard", userAuth, requireMfaSetup, (c) => {
+  return c.json({ message: "Welcome" });
+});
+```
+
 ### Email OTP
 
 An alternative to TOTP that sends a one-time code to the user's email. Users can enable TOTP, email OTP, or both.

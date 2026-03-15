@@ -157,6 +157,8 @@ export interface MfaConfig {
   emailOtp?: MfaEmailOtpConfig;
   /** WebAuthn/FIDO2 configuration. When set, enables security key MFA routes. */
   webauthn?: MfaWebAuthnConfig;
+  /** When true, authenticated users must complete MFA setup before accessing non-auth endpoints. Default: false. */
+  required?: boolean;
 }
 
 let _mfaConfig: MfaConfig | null = null;
@@ -173,6 +175,7 @@ export const getMfaChallengeTtl = (): number => _mfaConfig?.challengeTtlSeconds 
 export const getMfaEmailOtpConfig = (): MfaEmailOtpConfig | null => _mfaConfig?.emailOtp ?? null;
 export const getMfaEmailOtpCodeLength = (): number => _mfaConfig?.emailOtp?.codeLength ?? 6;
 export const getMfaWebAuthnConfig = (): MfaWebAuthnConfig | null => _mfaConfig?.webauthn ?? null;
+export const getMfaRequired = (): boolean => _mfaConfig?.required ?? false;
 
 // ---------------------------------------------------------------------------
 // CSRF config
