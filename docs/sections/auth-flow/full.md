@@ -94,17 +94,68 @@ bun add otpauth
 | `POST /auth/mfa/setup` | userAuth | Generate TOTP secret + otpauth URI (for QR code) |
 | `POST /auth/mfa/verify-setup` | userAuth | Confirm with TOTP code, returns recovery codes |
 | `POST /auth/mfa/verify` | none (uses mfaToken) | Complete login after password verified |
-| `DELETE /auth/mfa` | userAuth | Disable MFA (requires TOTP code) |
+| `DELETE /auth/mfa` | userAuth | Disable all MFA (requires TOTP code) |
 | `POST /auth/mfa/recovery-codes` | userAuth | Regenerate codes (requires TOTP code) |
+| `GET /auth/mfa/methods` | userAuth | Get enabled MFA methods |
 
 #### Login flow with MFA enabled
 
-1. `POST /auth/login` with credentials → password OK + MFA enabled → `{ mfaRequired: true, mfaToken: "..." }` (no session created)
+1. `POST /auth/login` with credentials → password OK + MFA enabled → `{ mfaRequired: true, mfaToken: "...", mfaMethods: ["totp"] }` (no session created)
 2. `POST /auth/mfa/verify` with `{ mfaToken, code }` → verifies TOTP or recovery code → creates session → returns normal token response
+
+The verify endpoint accepts an optional `method` field (`"totp"` or `"emailOtp"`) to target a specific verification method. When omitted, methods are tried automatically.
 
 **OAuth logins skip MFA** — the OAuth provider is treated as the second factor.
 
-**Recovery codes**: 10 random 8-character alphanumeric codes, stored as SHA-256 hashes. Each code can only be used once.
+**Recovery codes**: 10 random 8-character alphanumeric codes, stored as SHA-256 hashes. Each code can only be used once. Enabling a second MFA method regenerates recovery codes — save the new set.
+
+### Email OTP
+
+An alternative to TOTP that sends a one-time code to the user's email. Users can enable TOTP, email OTP, or both.
+
+```ts
+await createServer({
+  auth: {
+    mfa: {
+      challengeTtlSeconds: 300,
+      emailOtp: {
+        onSend: async (email, code) => {
+          await sendEmail(email, `Your login code: ${code}`);
+        },
+        codeLength: 6,  // default
+      },
+    },
+  },
+});
+```
+
+#### Endpoints
+
+| Endpoint | Auth | Purpose |
+|---|---|---|
+| `POST /auth/mfa/email-otp/enable` | userAuth | Send verification code to email |
+| `POST /auth/mfa/email-otp/verify-setup` | userAuth | Confirm code, enable email OTP |
+| `DELETE /auth/mfa/email-otp` | userAuth | Disable email OTP |
+| `POST /auth/mfa/resend` | none (uses mfaToken) | Resend email OTP code (max 3 per challenge) |
+
+#### Setup flow
+
+1. `POST /auth/mfa/email-otp/enable` → sends code to email → returns `{ setupToken }`
+2. `POST /auth/mfa/email-otp/verify-setup` with `{ setupToken, code }` → enables email OTP → returns recovery codes
+
+This two-step flow ensures the `onSend` callback actually delivers emails before MFA is activated, preventing lockout from misconfigured email providers.
+
+#### Login flow with email OTP
+
+1. `POST /auth/login` → `{ mfaRequired: true, mfaToken, mfaMethods: ["emailOtp"] }` — code is auto-sent to user's email
+2. `POST /auth/mfa/verify` with `{ mfaToken, code }` → creates session
+3. If the code didn't arrive: `POST /auth/mfa/resend` with `{ mfaToken }` (max 3 resends, capped at 3x challenge TTL)
+
+#### Disabling email OTP
+
+- If TOTP is also enabled: requires a TOTP code in the `code` field
+- If email OTP is the only method: requires the account password in the `password` field
+- Disabling the last MFA method turns off MFA entirely
 
 ### Account Deletion
 

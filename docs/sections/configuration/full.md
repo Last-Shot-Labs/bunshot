@@ -64,6 +64,10 @@ await createServer({
       issuer: "My App",                     // shown in authenticator apps (default: app name)
       recoveryCodes: 10,                    // default: 10
       challengeTtlSeconds: 300,             // default: 300 (5 min)
+      emailOtp: {                           // optional — email OTP as alternative MFA method
+        onSend: async (email, code) => {},  // called to deliver the OTP code — use any email provider
+        codeLength: 6,                      // default: 6
+      },
     },
     accountDeletion: {                      // optional — enables DELETE /auth/me
       onBeforeDelete: async (userId) => {}, // throw to abort

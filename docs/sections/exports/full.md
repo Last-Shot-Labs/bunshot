@@ -26,14 +26,14 @@ import {
   setRefreshToken, getSessionByRefreshToken, rotateRefreshToken,  // refresh token management
   createVerificationToken, getVerificationToken, deleteVerificationToken,  // email verification tokens
   createResetToken, consumeResetToken, setPasswordResetStore,              // password reset tokens
-  createMfaChallenge, consumeMfaChallenge, setMfaChallengeStore,           // MFA challenge tokens
+  createMfaChallenge, consumeMfaChallenge, replaceMfaChallengeOtp, setMfaChallengeStore, // MFA challenge tokens
   bustAuthLimit, trackAttempt, isLimited,          // auth rate limiting — use in custom routes or admin unlocks
   buildFingerprint,                                // HTTP fingerprint hash (IP-independent) — use in custom bot detection logic
   sqliteAuthAdapter, setSqliteDb, startSqliteCleanup,  // SQLite backend (persisted)
   memoryAuthAdapter, clearMemoryStore,                 // in-memory backend (ephemeral)
   setUserRoles, addUserRole, removeUserRole,       // app-wide role management
   getTenantRoles, setTenantRoles, addTenantRole, removeTenantRole, // tenant-scoped role management
-  type AuthAdapter, type OAuthProfile, type OAuthProviderConfig,
+  type AuthAdapter, type OAuthProfile, type OAuthProviderConfig, type MfaChallengeData,
   type AuthRateLimitConfig, type BotProtectionConfig, type BotProtectionOptions,
   type LimitOpts, type RateLimitOptions,
   type SessionMetadata, type SessionInfo, type RefreshResult,
@@ -68,7 +68,7 @@ import {
   type CreateServerConfig, type CreateAppConfig, type ModelSchemasConfig,
   type DbConfig, type AppMeta, type AuthConfig, type OAuthConfig, type SecurityConfig,
   type PrimaryField, type EmailVerificationConfig, type PasswordResetConfig,
-  type RefreshTokenConfig, type MfaConfig, type JobsConfig,
+  type RefreshTokenConfig, type MfaConfig, type MfaEmailOtpConfig, type JobsConfig,
   type AccountDeletionConfig,
   type SocketData, type WsConfig,
 } from "@lastshotlabs/bunshot";
