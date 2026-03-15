@@ -11,9 +11,21 @@ Update ReadMe and this file (CLAUDE.md) when adding, modifying, or deleting feat
 ```bash
 bun run dev     # Watch mode (hot reload)
 bun run start   # Run without watch
+bun run readme  # Compile README.md from docs/sections/ (default profile — all full)
+bun run readme:npm  # Compile with npm profile (overview variants for large sections)
 ```
 
 There are no build, test, or lint scripts — this is a library package published to npm as `@lastshotlabs/bunshot`.
+
+### Modular README
+
+`README.md` is auto-generated — **do not edit it directly**. Edit the section files in `docs/sections/` instead, then run `bun run readme` to recompile.
+
+- **`docs/readme.config.json`** — Section order, default variants, and named profiles. Reorder sections by moving lines here.
+- **`docs/build-readme.ts`** — Zero-dependency Bun build script.
+- **`docs/sections/{topic}/full.md`** — Full detailed content for each section.
+- **`docs/sections/{topic}/overview.md`** — Concise summary (exists for larger sections only).
+- Profiles (e.g., `npm`) override specific sections to use `overview` instead of `full`. Add new profiles in the config's `profiles` object.
 
 ## Architecture
 

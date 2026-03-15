@@ -1,0 +1,49 @@
+{
+  "output": "../README.md",
+  "separator": "---",
+  "sections": [
+    { "topic": "header", "file": "sections/header.md" },
+    { "topic": "quick-start", "default": "full", "separator": false },
+    { "topic": "stack", "default": "full" },
+    { "topic": "cli", "default": "full" },
+    { "topic": "installation", "default": "full" },
+    { "topic": "configuration-example", "default": "full" },
+    { "topic": "adding-routes", "default": "full" },
+    { "topic": "mongodb-connections", "default": "full" },
+    { "topic": "adding-models", "default": "full" },
+    { "topic": "jobs", "default": "full" },
+    { "topic": "websocket", "default": "full" },
+    { "topic": "websocket-rooms", "default": "full" },
+    { "topic": "adding-middleware", "default": "full" },
+    { "topic": "response-caching", "default": "full" },
+    { "topic": "extending-context", "default": "full" },
+    { "topic": "configuration", "default": "full" },
+    { "topic": "running-without-redis", "default": "full" },
+    { "topic": "running-without-redis-or-mongodb", "default": "full" },
+    { "topic": "auth-flow", "default": "full" },
+    { "topic": "roles", "default": "full" },
+    { "topic": "multi-tenancy", "default": "full" },
+    { "topic": "oauth", "default": "full" },
+    { "topic": "peer-dependencies", "default": "full" },
+    { "topic": "environment-variables", "default": "full" },
+    { "topic": "package-development", "default": "full" },
+    { "topic": "exports", "default": "full" }
+  ],
+  "profiles": {
+    "npm": {
+      "configuration-example": "overview",
+      "adding-routes": "overview",
+      "mongodb-connections": "overview",
+      "adding-models": "overview",
+      "jobs": "overview",
+      "websocket": "overview",
+      "websocket-rooms": "overview",
+      "response-caching": "overview",
+      "configuration": "overview",
+      "auth-flow": "overview",
+      "roles": "overview",
+      "multi-tenancy": "overview",
+      "oauth": "overview"
+    }
+  }
+}

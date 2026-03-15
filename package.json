@@ -47,7 +47,9 @@
     "prepublishOnly": "bun run build",
     "release": "npm version patch && npm publish",
     "dev": "bun --watch src/index.ts",
-    "start": "bun src/index.ts"
+    "start": "bun src/index.ts",
+    "readme": "bun docs/build-readme.ts",
+    "readme:npm": "bun docs/build-readme.ts npm"
   },
   "dependencies": {
     "@hono/zod-openapi": "1.2.2",
