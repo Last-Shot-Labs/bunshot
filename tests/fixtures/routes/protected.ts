@@ -38,3 +38,7 @@ router.get("/cached", cacheResponse({ key: "test-cached", ttl: 60, store: "memor
 router.get("/cached-dynamic", cacheResponse({ key: (c) => "dyn:" + (c.req.query("k") ?? "default"), ttl: 60, store: "memory" }), (c) => {
   return c.json({ time: Date.now(), key: c.req.query("k") });
 });
+
+router.get("/cached-default", cacheResponse({ key: "test-cached-default", ttl: 60 }), (c) => {
+  return c.json({ time: Date.now() });
+});

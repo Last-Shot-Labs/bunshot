@@ -4,6 +4,7 @@ import type { OpenAPIHono } from "@hono/zod-openapi";
 import * as OTPAuth from "otpauth";
 
 let app: OpenAPIHono<any>;
+const emailOtpCodes: { email: string; code: string }[] = [];
 
 beforeAll(async () => {
   app = await createTestApp({
@@ -11,13 +12,21 @@ beforeAll(async () => {
       enabled: true,
       roles: ["admin", "user"],
       defaultRole: "user",
-      mfa: { issuer: "TestApp" },
+      mfa: {
+        issuer: "TestApp",
+        emailOtp: {
+          onSend: async (email, code) => {
+            emailOtpCodes.push({ email, code });
+          },
+        },
+      },
     },
   });
 });
 
 beforeEach(() => {
   clearMemoryStore();
+  emailOtpCodes.length = 0;
 });
 
 const json = (body: Record<string, unknown>) => ({
@@ -207,5 +216,273 @@ describe("DELETE /auth/mfa", () => {
     expect(body.mfaRequired).toBeUndefined();
     expect(body.token).toBeString();
     expect(body.token.length).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// MFA Verify — method parameter
+// ---------------------------------------------------------------------------
+
+describe("POST /auth/mfa/verify — method param", () => {
+  test("returns error when neither code nor webauthnResponse provided", async () => {
+    await registerAndSetupMfa();
+    const loginRes = await app.request("/auth/login", json({ email: "mfa@example.com", password: "password123" }));
+    const { mfaToken } = await loginRes.json();
+
+    const res = await app.request("/auth/mfa/verify", json({ mfaToken }));
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.error).toContain("required");
+  });
+
+  test("verify with method: 'totp' succeeds", async () => {
+    const { secret } = await registerAndSetupMfa();
+    const loginRes = await app.request("/auth/login", json({ email: "mfa@example.com", password: "password123" }));
+    const { mfaToken } = await loginRes.json();
+
+    const code = generateTotpCode(secret);
+    const res = await app.request("/auth/mfa/verify", json({ mfaToken, code, method: "totp" }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.token).toBeString();
+  });
+
+  test("verify with invalid MFA token returns 401", async () => {
+    const res = await app.request("/auth/mfa/verify", json({ mfaToken: "invalid-token", code: "123456" }));
+    expect(res.status).toBe(401);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regenerate Recovery Codes
+// ---------------------------------------------------------------------------
+
+describe("POST /auth/mfa/recovery-codes", () => {
+  test("regenerates recovery codes with valid TOTP", async () => {
+    const { token, secret } = await registerAndSetupMfa();
+
+    const code = generateTotpCode(secret);
+    const res = await app.request("/auth/mfa/recovery-codes", {
+      method: "POST",
+      headers: { ...authHeader(token), "Content-Type": "application/json" },
+      body: JSON.stringify({ code }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.recoveryCodes).toBeArray();
+    expect(body.recoveryCodes).toHaveLength(10);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /auth/mfa/methods
+// ---------------------------------------------------------------------------
+
+describe("GET /auth/mfa/methods", () => {
+  test("returns enabled methods", async () => {
+    const { token } = await registerAndSetupMfa();
+
+    const res = await app.request("/auth/mfa/methods", {
+      headers: authHeader(token),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.methods).toContain("totp");
+  });
+
+  test("returns empty for user without MFA", async () => {
+    const { token } = await registerUser("nomfa@example.com");
+
+    const res = await app.request("/auth/mfa/methods", {
+      headers: authHeader(token),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.methods).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Email OTP — enable, verify-setup, disable (route-level)
+// ---------------------------------------------------------------------------
+
+describe("Email OTP routes", () => {
+  test("POST /auth/mfa/email-otp/enable sends code and returns setupToken", async () => {
+    const { token } = await registerUser("eotp@example.com");
+
+    const res = await app.request("/auth/mfa/email-otp/enable", {
+      method: "POST",
+      headers: authHeader(token),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.setupToken).toBeString();
+    expect(body.message).toContain("sent");
+    expect(emailOtpCodes).toHaveLength(1);
+    expect(emailOtpCodes[0].email).toBe("eotp@example.com");
+  });
+
+  test("POST /auth/mfa/email-otp/verify-setup enables email OTP", async () => {
+    const { token } = await registerUser("eotpv@example.com");
+
+    // Enable
+    const enableRes = await app.request("/auth/mfa/email-otp/enable", {
+      method: "POST",
+      headers: authHeader(token),
+    });
+    const { setupToken } = await enableRes.json();
+    const code = emailOtpCodes[0].code;
+
+    // Verify setup
+    const res = await app.request("/auth/mfa/email-otp/verify-setup", {
+      method: "POST",
+      headers: { ...authHeader(token), "Content-Type": "application/json" },
+      body: JSON.stringify({ setupToken, code }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.message).toContain("enabled");
+    expect(body.recoveryCodes).toBeArray();
+  });
+
+  test("DELETE /auth/mfa/email-otp disables email OTP with password", async () => {
+    const { token } = await registerUser("eotpd@example.com");
+
+    // Enable email OTP
+    const enableRes = await app.request("/auth/mfa/email-otp/enable", {
+      method: "POST",
+      headers: authHeader(token),
+    });
+    const { setupToken } = await enableRes.json();
+    const code = emailOtpCodes[0].code;
+    await app.request("/auth/mfa/email-otp/verify-setup", {
+      method: "POST",
+      headers: { ...authHeader(token), "Content-Type": "application/json" },
+      body: JSON.stringify({ setupToken, code }),
+    });
+
+    // Disable with password
+    const res = await app.request("/auth/mfa/email-otp", {
+      method: "DELETE",
+      headers: { ...authHeader(token), "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "password123" }),
+    });
+    expect(res.status).toBe(200);
+
+    // Methods should no longer include emailOtp
+    const methodsRes = await app.request("/auth/mfa/methods", { headers: authHeader(token) });
+    const methods = await methodsRes.json();
+    expect(methods.methods).not.toContain("emailOtp");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Email OTP login flow
+// ---------------------------------------------------------------------------
+
+describe("Email OTP login flow", () => {
+  test("login auto-sends email OTP when emailOtp method enabled", async () => {
+    const { token } = await registerUser("eotplogin@example.com");
+
+    // Enable email OTP
+    const enableRes = await app.request("/auth/mfa/email-otp/enable", {
+      method: "POST",
+      headers: authHeader(token),
+    });
+    const { setupToken } = await enableRes.json();
+    const setupCode = emailOtpCodes[0].code;
+    await app.request("/auth/mfa/email-otp/verify-setup", {
+      method: "POST",
+      headers: { ...authHeader(token), "Content-Type": "application/json" },
+      body: JSON.stringify({ setupToken, code: setupCode }),
+    });
+    emailOtpCodes.length = 0;
+
+    // Login should return mfaRequired and auto-send email OTP
+    const loginRes = await app.request("/auth/login", json({ email: "eotplogin@example.com", password: "password123" }));
+    const loginBody = await loginRes.json();
+    expect(loginBody.mfaRequired).toBe(true);
+    expect(loginBody.mfaMethods).toContain("emailOtp");
+    // onSend should have been called
+    expect(emailOtpCodes).toHaveLength(1);
+
+    // Verify with email OTP code
+    const verifyRes = await app.request("/auth/mfa/verify", json({
+      mfaToken: loginBody.mfaToken,
+      code: emailOtpCodes[0].code,
+      method: "emailOtp",
+    }));
+    expect(verifyRes.status).toBe(200);
+    const { token: sessionToken } = await verifyRes.json();
+    expect(sessionToken).toBeString();
+  });
+
+  test("auto-detect picks email OTP first when hash present", async () => {
+    const { token } = await registerUser("eotpauto@example.com");
+
+    // Enable email OTP
+    const enableRes = await app.request("/auth/mfa/email-otp/enable", {
+      method: "POST",
+      headers: authHeader(token),
+    });
+    const { setupToken } = await enableRes.json();
+    await app.request("/auth/mfa/email-otp/verify-setup", {
+      method: "POST",
+      headers: { ...authHeader(token), "Content-Type": "application/json" },
+      body: JSON.stringify({ setupToken, code: emailOtpCodes[0].code }),
+    });
+    emailOtpCodes.length = 0;
+
+    // Login
+    const loginRes = await app.request("/auth/login", json({ email: "eotpauto@example.com", password: "password123" }));
+    const { mfaToken } = await loginRes.json();
+
+    // Verify without specifying method — should auto-detect email OTP
+    const verifyRes = await app.request("/auth/mfa/verify", json({
+      mfaToken,
+      code: emailOtpCodes[0].code,
+    }));
+    expect(verifyRes.status).toBe(200);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Resend Email OTP
+// ---------------------------------------------------------------------------
+
+describe("POST /auth/mfa/resend", () => {
+  test("resends email OTP code", async () => {
+    const { token } = await registerUser("resend@example.com");
+
+    // Enable email OTP
+    const enableRes = await app.request("/auth/mfa/email-otp/enable", {
+      method: "POST",
+      headers: authHeader(token),
+    });
+    const { setupToken } = await enableRes.json();
+    await app.request("/auth/mfa/email-otp/verify-setup", {
+      method: "POST",
+      headers: { ...authHeader(token), "Content-Type": "application/json" },
+      body: JSON.stringify({ setupToken, code: emailOtpCodes[0].code }),
+    });
+    emailOtpCodes.length = 0;
+
+    // Login to get MFA token
+    const loginRes = await app.request("/auth/login", json({ email: "resend@example.com", password: "password123" }));
+    const { mfaToken } = await loginRes.json();
+    emailOtpCodes.length = 0;
+
+    // Resend
+    const resendRes = await app.request("/auth/mfa/resend", json({ mfaToken }));
+    expect(resendRes.status).toBe(200);
+    expect(emailOtpCodes).toHaveLength(1);
+
+    // Verify with new code
+    const verifyRes = await app.request("/auth/mfa/verify", json({
+      mfaToken,
+      code: emailOtpCodes[0].code,
+      method: "emailOtp",
+    }));
+    expect(verifyRes.status).toBe(200);
   });
 });
