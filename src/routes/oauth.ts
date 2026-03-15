@@ -17,7 +17,8 @@ import { createSession, getActiveSessionCount, evictOldestSession, setRefreshTok
 import { storeOAuthCode, consumeOAuthCode } from "@lib/oauthCode";
 import { COOKIE_TOKEN, COOKIE_REFRESH_TOKEN } from "@lib/constants";
 import { userAuth } from "@middleware/userAuth";
-import { getDefaultRole, getMaxSessions, getRefreshTokenConfig, getAccessTokenExpiry, getRefreshTokenExpiry } from "@lib/appConfig";
+import { getDefaultRole, getMaxSessions, getRefreshTokenConfig, getAccessTokenExpiry, getRefreshTokenExpiry, getCsrfEnabled } from "@lib/appConfig";
+import { refreshCsrfToken } from "@middleware/csrf";
 import { trackAttempt } from "@lib/authRateLimit";
 import { getClientIp } from "@lib/clientIp";
 
@@ -361,6 +362,7 @@ export const createOAuthRouter = (providers: string[], postLoginRedirect: string
       if (payload.refreshToken && rtConfig) {
         setCookie(c, COOKIE_REFRESH_TOKEN, payload.refreshToken, cookieOptions(getRefreshTokenExpiry()));
       }
+      if (getCsrfEnabled()) refreshCsrfToken(c);
 
       return c.json({
         token: payload.token,

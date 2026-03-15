@@ -7,7 +7,8 @@ import * as MfaService from "@services/mfa";
 import * as AuthService from "@services/auth";
 import { consumeMfaChallenge, replaceMfaChallengeOtp } from "@lib/mfaChallenge";
 import { COOKIE_TOKEN, COOKIE_REFRESH_TOKEN } from "@lib/constants";
-import { getRefreshTokenConfig, getAccessTokenExpiry, getRefreshTokenExpiry, getMfaEmailOtpConfig, getMfaWebAuthnConfig } from "@lib/appConfig";
+import { getRefreshTokenConfig, getAccessTokenExpiry, getRefreshTokenExpiry, getMfaEmailOtpConfig, getMfaWebAuthnConfig, getCsrfEnabled } from "@lib/appConfig";
+import { refreshCsrfToken } from "@middleware/csrf";
 import { getAuthAdapter } from "@lib/authAdapter";
 import { trackAttempt } from "@lib/authRateLimit";
 import { getClientIp } from "@lib/clientIp";
@@ -217,6 +218,7 @@ export const createMfaRouter = ({ rateLimit }: MfaRouterOptions = {}) => {
       if (result.refreshToken) {
         setCookie(c, COOKIE_REFRESH_TOKEN, result.refreshToken, cookieOptions(getRefreshTokenExpiry()));
       }
+      if (getCsrfEnabled()) refreshCsrfToken(c);
 
       return c.json({ token: result.token, userId, refreshToken: result.refreshToken }, 200);
     }

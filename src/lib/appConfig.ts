@@ -173,3 +173,12 @@ export const getMfaChallengeTtl = (): number => _mfaConfig?.challengeTtlSeconds 
 export const getMfaEmailOtpConfig = (): MfaEmailOtpConfig | null => _mfaConfig?.emailOtp ?? null;
 export const getMfaEmailOtpCodeLength = (): number => _mfaConfig?.emailOtp?.codeLength ?? 6;
 export const getMfaWebAuthnConfig = (): MfaWebAuthnConfig | null => _mfaConfig?.webauthn ?? null;
+
+// ---------------------------------------------------------------------------
+// CSRF config
+// ---------------------------------------------------------------------------
+
+let _csrfEnabled = false;
+
+export const setCsrfEnabled = (v: boolean) => { _csrfEnabled = v; };
+export const getCsrfEnabled = () => _csrfEnabled;

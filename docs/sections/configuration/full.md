@@ -118,6 +118,11 @@ await createServer({
       permissionsPolicy: "camera=(), microphone=()", // Permissions-Policy header value
     },
     trustProxy: 1,                          // default: false — see "Trusted Proxy" section below
+    csrf: {                                 // opt-in CSRF protection for cookie-based auth
+      enabled: true,                        // default: false
+      exemptPaths: ["/webhooks/*"],         // additional exempt paths (OAuth callbacks auto-exempt)
+      checkOrigin: true,                    // validate Origin header against CORS origins (default: true)
+    },
   },
 
   // Extra middleware injected after identify, before route matching

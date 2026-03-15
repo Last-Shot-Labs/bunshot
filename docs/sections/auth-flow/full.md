@@ -582,3 +582,53 @@ const myAdapter: AuthAdapter = {
   },
 };
 ```
+
+### CSRF Protection
+
+Opt-in via `security.csrf` — protects cookie-authenticated browser clients against cross-site request forgery attacks. Mobile apps and SPAs using header-based auth (`x-user-token`) are not affected and do not need CSRF.
+
+```ts
+await createServer({
+  security: {
+    csrf: {
+      enabled: true,
+      // exemptPaths: ["/webhooks/*"],  // additional exempt paths
+      // checkOrigin: true,             // validate Origin header (default: true)
+    },
+  },
+});
+```
+
+**How it works:**
+
+1. The first GET request sets a `csrf_token` cookie (non-HttpOnly, readable by JS)
+2. The token is HMAC-SHA256 signed with the JWT secret to prevent forgery
+3. For state-changing requests (POST/PUT/PATCH/DELETE), the client must send the cookie value back in the `x-csrf-token` header
+4. The middleware validates the signature and compares the header to the cookie using timing-safe comparison
+5. Requests without an auth cookie (`token`) skip validation — they are not vulnerable to CSRF
+
+The CSRF cookie is refreshed on login, register, MFA verify, and OAuth exchange. It is cleared on logout.
+
+**Client-side integration:**
+
+```js
+function getCsrfToken() {
+  return document.cookie
+    .split("; ")
+    .find(row => row.startsWith("csrf_token="))
+    ?.split("=")[1];
+}
+
+// Include on all state-changing requests
+fetch("/api/resource", {
+  method: "POST",
+  credentials: "include",
+  headers: {
+    "Content-Type": "application/json",
+    "X-CSRF-Token": getCsrfToken(),
+  },
+  body: JSON.stringify(data),
+});
+
+// After login, read the NEW csrf_token value (it's refreshed on auth state changes)
+```

@@ -1,7 +1,7 @@
 // App factory
 export { createApp } from "./app";
 export { createServer } from "./server";
-export type { CreateAppConfig, ModelSchemasConfig, DbConfig, AppMeta, AuthConfig, AuthRateLimitConfig, AccountDeletionConfig, OAuthConfig, SecurityConfig, BotProtectionConfig, PrimaryField, EmailVerificationConfig, PasswordResetConfig, RefreshTokenConfig, MfaConfig, MfaEmailOtpConfig, MfaWebAuthnConfig, JobsConfig, TenancyConfig, TenantConfig } from "./app";
+export type { CreateAppConfig, ModelSchemasConfig, DbConfig, AppMeta, AuthConfig, AuthRateLimitConfig, AccountDeletionConfig, OAuthConfig, SecurityConfig, CsrfConfig, BotProtectionConfig, PrimaryField, EmailVerificationConfig, PasswordResetConfig, RefreshTokenConfig, MfaConfig, MfaEmailOtpConfig, MfaWebAuthnConfig, JobsConfig, TenancyConfig, TenantConfig } from "./app";
 export type { PasswordPolicyConfig } from "@lib/appConfig";
 export type { CreateServerConfig, WsConfig } from "./server";
 
@@ -12,7 +12,7 @@ export { connectRedis, disconnectRedis, getRedis } from "@lib/redis";
 // Lib utilities
 export { getAppRoles } from "@lib/appConfig";
 export { HttpError } from "@lib/HttpError";
-export { COOKIE_TOKEN, HEADER_USER_TOKEN, COOKIE_REFRESH_TOKEN, HEADER_REFRESH_TOKEN } from "@lib/constants";
+export { COOKIE_TOKEN, HEADER_USER_TOKEN, COOKIE_REFRESH_TOKEN, HEADER_REFRESH_TOKEN, COOKIE_CSRF_TOKEN, HEADER_CSRF_TOKEN } from "@lib/constants";
 export { createRouter } from "@lib/context";
 export { createRoute, withSecurity, registerSchema, registerSchemas } from "@lib/createRoute";
 export { zodToMongoose } from "@lib/zodToMongoose";
@@ -46,6 +46,8 @@ export type { RateLimitOptions } from "@middleware/rateLimit";
 export { userAuth } from "@middleware/userAuth";
 export { requireRole } from "@middleware/requireRole";
 export { requireVerifiedEmail } from "@middleware/requireVerifiedEmail";
+export { csrfProtection, refreshCsrfToken, clearCsrfToken } from "@middleware/csrf";
+export type { CsrfMiddlewareOptions } from "@middleware/csrf";
 export { cacheResponse, bustCache, bustCachePattern, setCacheStore } from "@middleware/cacheResponse";
 
 // Lib utilities (bot protection)

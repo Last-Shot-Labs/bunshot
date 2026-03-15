@@ -9,8 +9,8 @@ import { rateLimit } from "@middleware/rateLimit";
 import { bearerAuth } from "@middleware/bearerAuth";
 import { identify } from "@middleware/identify";
 import type { AppEnv } from "@lib/context";
-import { HEADER_USER_TOKEN, HEADER_REFRESH_TOKEN } from "@lib/constants";
-import { setAppName, setAppRoles, setDefaultRole, setPrimaryField, setEmailVerificationConfig, setPasswordResetConfig, setPasswordPolicy, setMaxSessions, setPersistSessionMetadata, setIncludeInactiveSessions, setTrackLastActive, setRefreshTokenConfig, setMfaConfig } from "@lib/appConfig";
+import { HEADER_USER_TOKEN, HEADER_REFRESH_TOKEN, HEADER_CSRF_TOKEN } from "@lib/constants";
+import { setAppName, setAppRoles, setDefaultRole, setPrimaryField, setEmailVerificationConfig, setPasswordResetConfig, setPasswordPolicy, setMaxSessions, setPersistSessionMetadata, setIncludeInactiveSessions, setTrackLastActive, setRefreshTokenConfig, setMfaConfig, setCsrfEnabled } from "@lib/appConfig";
 import type { PrimaryField, EmailVerificationConfig, PasswordResetConfig, PasswordPolicyConfig, RefreshTokenConfig, MfaConfig, MfaEmailOtpConfig, MfaWebAuthnConfig } from "@lib/appConfig";
 import { setEmailVerificationStore } from "@lib/emailVerification";
 import { setPasswordResetStore } from "@lib/resetPassword";
@@ -228,6 +228,15 @@ export interface BotProtectionConfig {
   fingerprintRateLimit?: boolean;
 }
 
+export interface CsrfConfig {
+  /** Enable CSRF protection for cookie-authenticated state-changing requests. */
+  enabled: boolean;
+  /** Paths exempt from CSRF checks (in addition to built-in OAuth callback exemptions). Uses prefix matching when path ends with "*". */
+  exemptPaths?: string[];
+  /** Also validate Origin header against CORS origins. Default: true. */
+  checkOrigin?: boolean;
+}
+
 export interface SecurityConfig {
   /** CORS origins. Defaults to "*" */
   cors?: string | string[];
@@ -256,6 +265,12 @@ export interface SecurityConfig {
    * - A number N: trust N proxy hops — take the Nth-from-right IP in the X-Forwarded-For chain.
    */
   trustProxy?: false | number;
+  /**
+   * CSRF protection for cookie-based auth. Opt-in.
+   * Uses signed double-submit cookie pattern with HMAC-SHA256.
+   * Only validates when the auth cookie is present on state-changing requests.
+   */
+  csrf?: CsrfConfig;
 }
 
 export interface ModelSchemasConfig {
@@ -518,7 +533,9 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
       }
     });
   }
-  app.use(cors({ origin: corsOrigins, allowHeaders: ["Content-Type", "Authorization", HEADER_USER_TOKEN, HEADER_REFRESH_TOKEN], exposeHeaders: ["x-cache"], credentials: true }));
+  const corsAllowHeaders = ["Content-Type", "Authorization", HEADER_USER_TOKEN, HEADER_REFRESH_TOKEN];
+  if (securityConfig.csrf?.enabled) corsAllowHeaders.push(HEADER_CSRF_TOKEN);
+  app.use(cors({ origin: corsOrigins, allowHeaders: corsAllowHeaders, exposeHeaders: ["x-cache"], credentials: true }));
   if ((botCfg.blockList?.length ?? 0) > 0) {
     const { botProtection } = await import("@middleware/botProtection");
     app.use(botProtection({ blockList: botCfg.blockList }));
@@ -534,6 +551,21 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
     });
   }
   app.use(identify);
+
+  // CSRF protection (after identify so we can check for auth cookie presence)
+  if (securityConfig.csrf?.enabled) {
+    setCsrfEnabled(true);
+    const { csrfProtection } = await import("@middleware/csrf");
+    const csrfExemptPaths = [
+      ...oauthBypass.filter(p => p.includes("/callback")),
+      ...(securityConfig.csrf.exemptPaths ?? []),
+    ];
+    app.use(csrfProtection({
+      exemptPaths: csrfExemptPaths,
+      checkOrigin: securityConfig.csrf.checkOrigin ?? true,
+      allowedOrigins: corsOrigins,
+    }));
+  }
 
   // Tenant resolution middleware (after identify, before user middleware + routes)
   if (config.tenancy) {

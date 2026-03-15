@@ -42,3 +42,11 @@ router.get("/cached-dynamic", cacheResponse({ key: (c) => "dyn:" + (c.req.query(
 router.get("/cached-default", cacheResponse({ key: "test-cached-default", ttl: 60 }), (c) => {
   return c.json({ time: Date.now() });
 });
+
+router.post("/protected/action", userAuth, (c) => {
+  return c.json({ message: "action performed" });
+});
+
+router.post("/public/action", (c) => {
+  return c.json({ message: "public action performed" });
+});

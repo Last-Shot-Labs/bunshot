@@ -3,7 +3,7 @@ import { z } from "zod";
 import { setCookie, getCookie, deleteCookie } from "hono/cookie";
 import * as AuthService from "@services/auth";
 import { makeRegisterSchema, makeLoginSchema, resetPasswordSchema } from "@schemas/auth";
-import { COOKIE_TOKEN, HEADER_USER_TOKEN, COOKIE_REFRESH_TOKEN, HEADER_REFRESH_TOKEN } from "@lib/constants";
+import { COOKIE_TOKEN, HEADER_USER_TOKEN, COOKIE_REFRESH_TOKEN, HEADER_REFRESH_TOKEN, COOKIE_CSRF_TOKEN } from "@lib/constants";
 import { userAuth } from "@middleware/userAuth";
 import { isLimited, trackAttempt, bustAuthLimit } from "@lib/authRateLimit";
 import { getAuthAdapter } from "@lib/authAdapter";
@@ -11,7 +11,8 @@ import { createRouter } from "@lib/context";
 import { getVerificationToken, deleteVerificationToken, createVerificationToken } from "@lib/emailVerification";
 import { createResetToken, consumeResetToken } from "@lib/resetPassword";
 import type { PrimaryField, EmailVerificationConfig, PasswordResetConfig, RefreshTokenConfig } from "@lib/appConfig";
-import { getRefreshTokenExpiry, getAccessTokenExpiry } from "@lib/appConfig";
+import { getRefreshTokenExpiry, getAccessTokenExpiry, getCsrfEnabled } from "@lib/appConfig";
+import { refreshCsrfToken, clearCsrfToken } from "@middleware/csrf";
 import type { AuthRateLimitConfig, AccountDeletionConfig } from "../app";
 import { getUserSessions, deleteSession, deleteUserSessions } from "@lib/session";
 import { getClientIp } from "@lib/clientIp";
@@ -94,6 +95,7 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
       if (result.refreshToken) {
         setCookie(c, COOKIE_REFRESH_TOKEN, result.refreshToken, cookieOptions(getRefreshTokenExpiry()));
       }
+      if (getCsrfEnabled()) refreshCsrfToken(c);
       return c.json(result, 201);
     }
   );
@@ -132,6 +134,7 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
           if (result.refreshToken) {
             setCookie(c, COOKIE_REFRESH_TOKEN, result.refreshToken, cookieOptions(getRefreshTokenExpiry()));
           }
+          if (getCsrfEnabled()) refreshCsrfToken(c);
         }
         return c.json(result, 200);
       } catch (err) {
@@ -302,6 +305,7 @@ export const createAuthRouter = ({ primaryField, emailVerification, passwordRese
       await AuthService.logout(token);
       deleteCookie(c, COOKIE_TOKEN, { path: "/" });
       deleteCookie(c, COOKIE_REFRESH_TOKEN, { path: "/" });
+      if (getCsrfEnabled()) clearCsrfToken(c);
       return c.json({ message: "Logged out" }, 200);
     }
   );
