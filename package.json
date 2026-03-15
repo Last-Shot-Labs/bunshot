@@ -58,7 +58,7 @@
     "test:docker:down": "docker compose -f docker-compose.test.yml down",
     "test:docker": "bun test --config bunfig.docker.toml tests/docker/",
     "test:all": "bun test tests/unit tests/integration && bun run test:docker",
-    "test:coverage:full": "bun test --coverage --config bunfig.ci.toml tests/unit tests/integration tests/docker"
+    "test:coverage:full": "bun run test:docker:up && bun test --coverage --config bunfig.ci.toml tests/unit tests/integration tests/docker; bun run test:docker:down"
   },
   "dependencies": {
     "@hono/zod-openapi": "1.2.2",

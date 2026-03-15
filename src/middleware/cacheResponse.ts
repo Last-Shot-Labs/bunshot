@@ -16,7 +16,7 @@ interface CacheDoc {
   expiresAt?: Date;
 }
 
-function getCacheModel() {
+export function getCacheModel() {
   if (appConnection.models["CacheEntry"]) return appConnection.models["CacheEntry"];
   const { Schema } = mongoose as unknown as typeof import("mongoose");
   const cacheSchema = new Schema<CacheDoc>(

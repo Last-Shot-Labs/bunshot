@@ -6,8 +6,11 @@ process.env.JWT_SECRET_DEV = "test-secret-key-must-be-at-least-32-chars!!";
 process.env.BEARER_TOKEN_DEV = "test-bearer-token";
 process.env.NODE_ENV = "development";
 
-// Redis env vars — port 6380 maps to Docker container
+// Redis env vars — port 6380 maps to Docker container (clear credentials so
+// the no-auth Docker Redis isn't sent the .env file's production creds)
 process.env.REDIS_HOST_DEV = "localhost:6380";
+delete process.env.REDIS_USER_DEV;
+delete process.env.REDIS_PW_DEV;
 
 // Mongo env vars — not used directly (we connect with plain URI), but set for completeness
 process.env.MONGO_HOST_DEV = "localhost:27018";
@@ -72,7 +75,7 @@ export async function flushTestServices(): Promise<void> {
     }
     const collections = await authConnection.db!.listCollections().toArray();
     await Promise.all(
-      collections.map((c) => authConnection.db!.dropCollection(c.name))
+      collections.map((c) => authConnection.db!.collection(c.name).deleteMany({}))
     );
   }
 }

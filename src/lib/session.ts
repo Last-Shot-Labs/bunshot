@@ -82,7 +82,7 @@ function getSessionModel() {
       expiresAt:    { type: Date,   required: true },
       ipAddress:    { type: String },
       userAgent:    { type: String },
-      refreshToken:      { type: String, default: null, sparse: true },
+      refreshToken:      { type: String, default: null },
       prevRefreshToken:  { type: String, default: null },
       prevTokenExpiresAt:{ type: Date,   default: null },
     },
@@ -311,9 +311,11 @@ async function redisRotateRefreshToken(sessionId: string, newRefreshToken: strin
   await redis.set(redisSessionKey(sessionId), JSON.stringify(rec));
   // Set new reverse-lookup with full refresh expiry
   await redis.set(redisRefreshTokenKey(newRefreshToken), sessionId, "EX", refreshExpiry);
-  // Update old reverse-lookup to expire after grace window
+  // Update old reverse-lookup to expire after grace window.
+  // Use a minimum TTL of 60s so that theft detection still works when grace is 0.
   if (oldRefreshToken) {
-    await redis.expire(redisRefreshTokenKey(oldRefreshToken), graceSeconds);
+    const oldKeyTtl = Math.max(graceSeconds, 60);
+    await redis.expire(redisRefreshTokenKey(oldRefreshToken), oldKeyTtl);
   }
 }
 

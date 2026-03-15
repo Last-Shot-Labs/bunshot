@@ -1,13 +1,15 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
 import { connectTestMongo, flushTestServices, disconnectTestServices } from "../setup-docker";
 import { setAppName } from "../../src/lib/appConfig";
-import { setCacheStore, bustCache, bustCachePattern } from "../../src/middleware/cacheResponse";
+import { setCacheStore, getCacheModel, bustCache, bustCachePattern } from "../../src/middleware/cacheResponse";
 import { appConnection } from "../../src/lib/mongo";
 
 beforeAll(async () => {
   await connectTestMongo();
   setAppName("test-app");
   setCacheStore("mongo");
+  // Ensure the CacheEntry model is registered on appConnection
+  getCacheModel();
 });
 
 afterAll(async () => {
@@ -18,19 +20,13 @@ beforeEach(async () => {
   await flushTestServices();
 });
 
-function getCacheModel() {
+function getModel() {
   return appConnection.models["CacheEntry"];
 }
 
 describe("Mongo cache store", () => {
   it("stores and retrieves a cache entry", async () => {
-    const CacheEntry = getCacheModel();
-    if (!CacheEntry) {
-      // Force model registration by importing the middleware
-      const { cacheResponse } = await import("../../src/middleware/cacheResponse");
-    }
-    // Insert directly via model
-    const model = appConnection.models["CacheEntry"];
+    const model = getModel();
     await model.create({
       key: "cache:test-app:test-key",
       value: JSON.stringify({ status: 200, headers: {}, body: "hello" }),
@@ -42,8 +38,7 @@ describe("Mongo cache store", () => {
   });
 
   it("upserts on duplicate key", async () => {
-    const model = appConnection.models["CacheEntry"];
-    if (!model) return; // Skip if model not yet registered
+    const model = getModel();
 
     await model.updateOne(
       { key: "cache:test-app:upsert" },
@@ -62,8 +57,7 @@ describe("Mongo cache store", () => {
   });
 
   it("bustCache deletes a specific key", async () => {
-    const model = appConnection.models["CacheEntry"];
-    if (!model) return;
+    const model = getModel();
 
     await model.create({ key: "cache:test-app:bust-me", value: "val" });
     await bustCache("bust-me");
@@ -73,8 +67,7 @@ describe("Mongo cache store", () => {
   });
 
   it("bustCachePattern deletes matching keys via regex", async () => {
-    const model = appConnection.models["CacheEntry"];
-    if (!model) return;
+    const model = getModel();
 
     await model.create({ key: "cache:test-app:users:1", value: "a" });
     await model.create({ key: "cache:test-app:users:2", value: "b" });
@@ -88,8 +81,7 @@ describe("Mongo cache store", () => {
   });
 
   it("stores entry with expiresAt", async () => {
-    const model = appConnection.models["CacheEntry"];
-    if (!model) return;
+    const model = getModel();
 
     const expiresAt = new Date(Date.now() + 60_000);
     await model.create({ key: "cache:test-app:expiry", value: "data", expiresAt });

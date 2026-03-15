@@ -248,25 +248,22 @@ export const replaceMfaChallengeOtp = async (
 
   if (_store === "mongo") {
     const now = new Date();
-    const doc = await getMfaChallengeModel().findOneAndUpdate(
-      { token: hash, expiresAt: { $gt: now }, resendCount: { $lt: MAX_RESENDS } },
-      [
-        {
-          $set: {
-            emailOtpHash: newEmailOtpHash,
-            resendCount: { $add: ["$resendCount", 1] },
-            expiresAt: {
-              $min: [
-                new Date(Date.now() + ttl * 1000),
-                { $add: ["$createdAt", ttl * 3 * 1000] },
-              ],
-            },
-          },
-        },
-      ],
-      { new: true }
-    );
-    return doc ? { userId: doc.userId, resendCount: doc.resendCount } : null;
+    const existing = await getMfaChallengeModel().findOne({
+      token: hash,
+      expiresAt: { $gt: now },
+      resendCount: { $lt: MAX_RESENDS },
+    });
+    if (!existing) return null;
+    const newCount = existing.resendCount + 1;
+    const newExpiry = new Date(Math.min(
+      Date.now() + ttl * 1000,
+      existing.createdAt.getTime() + ttl * 3 * 1000,
+    ));
+    existing.emailOtpHash = newEmailOtpHash;
+    existing.resendCount = newCount;
+    existing.expiresAt = newExpiry;
+    await existing.save();
+    return { userId: existing.userId, resendCount: newCount };
   }
 
   // redis

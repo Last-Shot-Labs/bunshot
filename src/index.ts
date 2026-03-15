@@ -48,7 +48,7 @@ export { requireRole } from "@middleware/requireRole";
 export { requireVerifiedEmail } from "@middleware/requireVerifiedEmail";
 export { csrfProtection, refreshCsrfToken, clearCsrfToken } from "@middleware/csrf";
 export type { CsrfMiddlewareOptions } from "@middleware/csrf";
-export { cacheResponse, bustCache, bustCachePattern, setCacheStore } from "@middleware/cacheResponse";
+export { cacheResponse, bustCache, bustCachePattern, setCacheStore, getCacheModel } from "@middleware/cacheResponse";
 
 // Lib utilities (bot protection)
 export { buildFingerprint } from "@lib/fingerprint";

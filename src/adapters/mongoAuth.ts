@@ -181,7 +181,7 @@ export const mongoAuthAdapter: AuthAdapter = {
   async setTenantRoles(userId, tenantId, roles) {
     await TenantRole.findOneAndUpdate(
       { userId, tenantId },
-      { roles },
+      { $set: { roles } },
       { upsert: true }
     );
   },
