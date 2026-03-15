@@ -60,6 +60,157 @@ bun add @lastshotlabs/bunshot
 
 ---
 
+## Quick Start
+
+### 1. Entry point
+
+```ts
+// src/index.ts
+import { createServer } from "@lastshotlabs/bunshot";
+import { appConfig } from "@config/index";
+
+await createServer(appConfig);
+```
+
+### 2. Configuration
+
+All configuration lives in a single `appConfig` object. Here's a real-world example:
+
+```ts
+// src/config/index.ts
+import path from "path";
+import {
+  type CreateServerConfig,
+  type AppMeta,
+  type AuthConfig,
+  type DbConfig,
+  type SecurityConfig,
+  type ModelSchemasConfig,
+} from "@lastshotlabs/bunshot";
+
+const app: AppMeta = {
+  name: "My App",
+  version: "1.0.0",
+};
+
+const db: DbConfig = {
+  mongo: "single",       // "single" | "separate" | false
+  redis: true,           // false to skip Redis
+  sessions: "redis",     // "redis" | "mongo" | "sqlite" | "memory"
+  cache: "memory",       // default store for cacheResponse
+  auth: "mongo",         // "mongo" | "sqlite" | "memory"
+  oauthState: "memory",  // where to store OAuth state tokens
+};
+
+const auth: AuthConfig = {
+  roles: ["admin", "user"],
+  defaultRole: "user",
+  primaryField: "email",
+  rateLimit: { store: "redis" },
+  emailVerification: {
+    required: true,
+    tokenExpiry: 60 * 60, // 1 hour
+    onSend: async (email, token) => {
+      // send verification email using any provider (Resend, SES, etc.)
+    },
+  },
+  oauth: {
+    postRedirect: "http://localhost:5175/oauth/callback",
+    providers: {
+      google: {
+        clientId: process.env.GOOGLE_CLIENT_ID!,
+        clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+        redirectUri: `http://localhost:${process.env.PORT ?? 3000}/auth/google/callback`,
+      },
+    },
+  },
+};
+
+const security: SecurityConfig = {
+  bearerAuth: true,
+  cors: ["*", "http://localhost:5173"],
+  botProtection: { fingerprintRateLimit: true },
+};
+
+const modelSchemas: ModelSchemasConfig = {
+  registration: "auto",
+  paths: [path.join(import.meta.dir, "../schemas/*.ts")],
+};
+
+export const appConfig: CreateServerConfig = {
+  app,
+  routesDir: path.join(import.meta.dir, "../routes"),
+  workersDir: path.join(import.meta.dir, "../workers"),
+  port: process.env.PORT ? parseInt(process.env.PORT) : 3000,
+  db,
+  auth,
+  security,
+  modelSchemas,
+  middleware: [/* your global middleware here */],
+};
+```
+
+Every field above is optional except `routesDir`. See the [Configuration](#configuration) section for the full reference.
+
+### 3. Add a route
+
+Drop a file in your `routes/` directory — it's auto-discovered, no registration needed:
+
+```ts
+// src/routes/products.ts
+import { z } from "zod";
+import { createRoute, createRouter, userAuth } from "@lastshotlabs/bunshot";
+
+export const router = createRouter();
+
+router.use("/products", userAuth);
+
+router.openapi(
+  createRoute({
+    method: "get",
+    path: "/products",
+    responses: {
+      200: {
+        content: { "application/json": { schema: z.object({ items: z.array(z.string()) }) } },
+        description: "Product list",
+      },
+    },
+  }),
+  async (c) => {
+    const userId = c.get("authUserId");
+    return c.json({ items: [] }, 200);
+  }
+);
+```
+
+### 4. Run it
+
+```bash
+bun run dev   # watch mode with hot reload
+```
+
+### What you get out of the box
+
+| Endpoint | Description |
+|---|---|
+| `POST /auth/register` | Create account, returns JWT |
+| `POST /auth/login` | Login, returns JWT (includes `emailVerified` when verification is configured) |
+| `POST /auth/logout` | Invalidates the current session only |
+| `GET /auth/me` | Returns current user's `userId`, `email`, `emailVerified`, and `googleLinked` (requires login) |
+| `POST /auth/set-password` | Set or update password (requires login) |
+| `GET /auth/sessions` | List active sessions with metadata — IP, user-agent, timestamps (requires login) |
+| `DELETE /auth/sessions/:sessionId` | Revoke a specific session by ID (requires login) |
+| `POST /auth/verify-email` | Verify email with token (when `emailVerification` is configured) |
+| `POST /auth/resend-verification` | Resend verification email (requires login, when `emailVerification` is configured) |
+| `POST /auth/forgot-password` | Request a password reset email (when `passwordReset` is configured) |
+| `POST /auth/reset-password` | Reset password using a token from the reset email (when `passwordReset` is configured) |
+| `GET /health` | Health check |
+| `GET /docs` | Scalar API docs UI |
+| `GET /openapi.json` | OpenAPI spec |
+| `WS /ws` | WebSocket endpoint (cookie-JWT auth) |
+
+---
+
 ## Peer Dependencies
 
 Bunshot declares the following as peer dependencies so you control their versions and avoid duplicate installs in your app.
@@ -102,72 +253,9 @@ If you're running fully on SQLite or memory (no Redis, no MongoDB), none of the 
 
 ---
 
-## Quick Start
-
-```ts
-// src/index.ts
-import { createServer } from "@lastshotlabs/bunshot";
-import { appConfig } from "@config/index";
-
-await createServer(appConfig);
-```
-
-All configuration lives in `src/config/index.ts` — see the CLI-generated scaffold for the full setup.
-
-That's it. Your app gets:
-
-| Endpoint | Description |
-|---|---|
-| `POST /auth/register` | Create account, returns JWT |
-| `POST /auth/login` | Login, returns JWT (includes `emailVerified` when verification is configured) |
-| `POST /auth/logout` | Invalidates the current session only |
-| `GET /auth/me` | Returns current user's `userId`, `email`, `emailVerified`, and `googleLinked` (requires login) |
-| `POST /auth/set-password` | Set or update password (requires login) |
-| `GET /auth/sessions` | List active sessions with metadata — IP, user-agent, timestamps (requires login) |
-| `DELETE /auth/sessions/:sessionId` | Revoke a specific session by ID (requires login) |
-| `POST /auth/verify-email` | Verify email with token (when `emailVerification` is configured) |
-| `POST /auth/resend-verification` | Resend verification email (requires login, when `emailVerification` is configured) |
-| `POST /auth/forgot-password` | Request a password reset email (when `passwordReset` is configured) |
-| `POST /auth/reset-password` | Reset password using a token from the reset email (when `passwordReset` is configured) |
-| `GET /health` | Health check |
-| `GET /docs` | Scalar API docs UI |
-| `GET /openapi.json` | OpenAPI spec |
-| `WS /ws` | WebSocket endpoint (cookie-JWT auth) |
-
----
-
 ## Adding Routes
 
-Drop a file in your `routes/` directory. It must export a `router`:
-
-```ts
-// src/routes/products.ts
-import { z } from "zod";
-import { createRoute, createRouter, userAuth } from "@lastshotlabs/bunshot";
-
-export const router = createRouter();
-
-router.use("/products", userAuth); // require login
-
-router.openapi(
-  createRoute({
-    method: "get",
-    path: "/products",
-    responses: {
-      200: {
-        content: { "application/json": { schema: z.object({ items: z.array(z.string()) }) } },
-        description: "Product list",
-      },
-    },
-  }),
-  async (c) => {
-    const userId = c.get("authUserId");
-    return c.json({ items: [] }, 200);
-  }
-);
-```
-
-Routes are auto-discovered via glob — no registration needed. Subdirectories are supported, so you can organise by feature:
+Drop a file in your `routes/` directory that exports a `router` — see the [Quick Start](#3-add-a-route) example above. Routes are auto-discovered via glob — no registration needed. Subdirectories are supported, so you can organise by feature:
 
 ```
 routes/
