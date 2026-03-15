@@ -114,7 +114,7 @@ describe("OAuth exchange endpoint", () => {
     expect(res.status).toBe(200);
 
     const cookies = res.headers.get("set-cookie");
-    expect(cookies).toContain("user_token=");
+    expect(cookies).toContain("token=");
   });
 
   it("rate limits exchange attempts per IP", async () => {

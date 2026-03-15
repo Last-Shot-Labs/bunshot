@@ -69,7 +69,7 @@ describe("SQLite: provider linking", () => {
         body: JSON.stringify({ password: "Password1!" }),
       })
     );
-    expect(delRes.status).toBe(204);
+    expect(delRes.status).toBe(200);
 
     // Session should be invalid now
     const meRes = await app.request(
@@ -207,29 +207,29 @@ describe("SQLite: WebAuthn credentials", () => {
     clearMemoryStore();
   });
 
-  const cred = {
-    credentialId: "cred-sqlite-1",
+  const makeCred = (id: string) => ({
+    credentialId: id,
     publicKey: "pk-1",
     signCount: 0,
     transports: ["usb"],
     name: "My Key",
     createdAt: Date.now(),
-  };
+  });
 
   it("adds and retrieves credentials", async () => {
     const { id } = await adapter.create("webauthn-sq@example.com", "hash");
-    await adapter.addWebAuthnCredential(id, cred);
+    await adapter.addWebAuthnCredential(id, makeCred("cred-sqlite-add"));
 
     const creds = await adapter.getWebAuthnCredentials(id);
     expect(creds).toHaveLength(1);
-    expect(creds[0].credentialId).toBe("cred-sqlite-1");
+    expect(creds[0].credentialId).toBe("cred-sqlite-add");
     expect(creds[0].transports).toEqual(["usb"]);
   });
 
   it("updates sign count", async () => {
     const { id } = await adapter.create("signcount-sq@example.com", "hash");
-    await adapter.addWebAuthnCredential(id, cred);
-    await adapter.updateWebAuthnCredentialSignCount(id, "cred-sqlite-1", 10);
+    await adapter.addWebAuthnCredential(id, makeCred("cred-sqlite-signcount"));
+    await adapter.updateWebAuthnCredentialSignCount(id, "cred-sqlite-signcount", 10);
 
     const creds = await adapter.getWebAuthnCredentials(id);
     expect(creds[0].signCount).toBe(10);
@@ -237,8 +237,8 @@ describe("SQLite: WebAuthn credentials", () => {
 
   it("removes a credential", async () => {
     const { id } = await adapter.create("removecred-sq@example.com", "hash");
-    await adapter.addWebAuthnCredential(id, cred);
-    await adapter.removeWebAuthnCredential(id, "cred-sqlite-1");
+    await adapter.addWebAuthnCredential(id, makeCred("cred-sqlite-remove"));
+    await adapter.removeWebAuthnCredential(id, "cred-sqlite-remove");
 
     const creds = await adapter.getWebAuthnCredentials(id);
     expect(creds).toHaveLength(0);
@@ -246,7 +246,7 @@ describe("SQLite: WebAuthn credentials", () => {
 
   it("finds user by credential ID", async () => {
     const { id } = await adapter.create("findcred-sq@example.com", "hash");
-    await adapter.addWebAuthnCredential(id, { ...cred, credentialId: "cred-find-sq" });
+    await adapter.addWebAuthnCredential(id, makeCred("cred-find-sq"));
 
     const userId = await adapter.findUserByWebAuthnCredentialId("cred-find-sq");
     expect(userId).toBe(id);

@@ -490,7 +490,7 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
   setEmailVerificationConfig(emailVerification ?? null);
   setEmailVerificationStore(sessions);
   setPasswordResetConfig(passwordReset ?? null);
-  if (authConfig.passwordPolicy) setPasswordPolicy(authConfig.passwordPolicy);
+  setPasswordPolicy(authConfig.passwordPolicy ?? {});
   setPasswordResetStore(sessions);
   setAuthRateLimitStore(authRateLimit?.store ?? (enableRedis ? "redis" : "memory"));
   setMaxSessions(sessionPolicy.maxSessions ?? 6);
