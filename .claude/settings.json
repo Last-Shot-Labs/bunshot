@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(cmd.exe /c \"where bun\")",
-      "Read(//c/Users/email/**)"
+      "Read(//c/Users/email/**)",
+      "Bash(export PATH=\"/c/Users/email/.bun/bin:$PATH\")",
+      "Bash(bun test:*)"
     ]
   }
 }

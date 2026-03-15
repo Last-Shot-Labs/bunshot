@@ -4,3 +4,5 @@ dist
 .npmrc
 
 .feature-plans
+.claude
+CLAUDE.md
