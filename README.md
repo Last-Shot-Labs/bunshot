@@ -2,6 +2,52 @@
 
 A personal Bun + Hono API framework. Install it in any app and get auth, sessions, rate limiting, WebSocket, queues, and OpenAPI docs out of the box — then add your own routes, workers, models, and services.
 
+## Quick Start
+
+```bash
+bun add @lastshotlabs/bunshot hono zod
+```
+
+```ts
+// src/index.ts
+import { createServer } from "@lastshotlabs/bunshot";
+
+await createServer({
+  routesDir: import.meta.dir + "/routes",
+  db: { auth: "memory", mongo: false, redis: false, sessions: "memory", cache: "memory" },
+});
+```
+
+```ts
+// src/routes/hello.ts
+import { z } from "zod";
+import { createRoute, createRouter } from "@lastshotlabs/bunshot";
+
+export const router = createRouter();
+
+router.openapi(
+  createRoute({
+    method: "get",
+    path: "/hello",
+    responses: {
+      200: {
+        content: { "application/json": { schema: z.object({ message: z.string() }) } },
+        description: "Hello",
+      },
+    },
+  }),
+  (c) => c.json({ message: "Hello world!" }, 200)
+);
+```
+
+```bash
+bun run src/index.ts
+```
+
+Auth, OpenAPI docs (`/docs`), health check, and WebSocket are all live. No databases required — swap `"memory"` for `"redis"` / `"mongo"` / `"sqlite"` when you're ready.
+
+---
+
 ## Stack
 
 - **Runtime**: [Bun](https://bun.sh)
@@ -51,30 +97,15 @@ Path aliases like `@config/*`, `@lib/*`, `@middleware/*`, `@models/*`, `@routes/
 ## Installation
 
 ```bash
-# from a local path (while developing the package)
-bun add @lastshotlabs/bunshot@file:../bunshot
-
-# from GitHub Packages (once published)
+# from npm
 bun add @lastshotlabs/bunshot
 ```
 
 ---
 
-## Quick Start
+## Full Configuration Example
 
-### 1. Entry point
-
-```ts
-// src/index.ts
-import { createServer } from "@lastshotlabs/bunshot";
-import { appConfig } from "@config/index";
-
-await createServer(appConfig);
-```
-
-### 2. Configuration
-
-All configuration lives in a single `appConfig` object. Here's a real-world example:
+For production apps, break config into its own file. Here's a real-world setup with MongoDB, Redis, OAuth, and email verification:
 
 ```ts
 // src/config/index.ts
@@ -152,44 +183,7 @@ export const appConfig: CreateServerConfig = {
 
 Every field above is optional except `routesDir`. See the [Configuration](#configuration) section for the full reference.
 
-### 3. Add a route
-
-Drop a file in your `routes/` directory — it's auto-discovered, no registration needed:
-
-```ts
-// src/routes/products.ts
-import { z } from "zod";
-import { createRoute, createRouter, userAuth } from "@lastshotlabs/bunshot";
-
-export const router = createRouter();
-
-router.use("/products", userAuth);
-
-router.openapi(
-  createRoute({
-    method: "get",
-    path: "/products",
-    responses: {
-      200: {
-        content: { "application/json": { schema: z.object({ items: z.array(z.string()) }) } },
-        description: "Product list",
-      },
-    },
-  }),
-  async (c) => {
-    const userId = c.get("authUserId");
-    return c.json({ items: [] }, 200);
-  }
-);
-```
-
-### 4. Run it
-
-```bash
-bun run dev   # watch mode with hot reload
-```
-
-### What you get out of the box
+### Built-in endpoints
 
 | Endpoint | Description |
 |---|---|
@@ -211,51 +205,9 @@ bun run dev   # watch mode with hot reload
 
 ---
 
-## Peer Dependencies
-
-Bunshot declares the following as peer dependencies so you control their versions and avoid duplicate installs in your app.
-
-### Required
-
-These must be installed in every consuming app:
-
-```bash
-bun add hono zod
-```
-
-| Package | Required version |
-|---|---|
-| `hono` | `>=4.12 <5` |
-| `zod` | `>=4.0 <5` |
-
-### Optional
-
-Install only what your app actually uses:
-
-```bash
-# MongoDB auth / sessions / cache
-bun add mongoose
-
-# Redis sessions, cache, rate limiting, or BullMQ
-bun add ioredis
-
-# Background job queues
-bun add bullmq
-```
-
-| Package | Required version | When you need it |
-|---|---|---|
-| `mongoose` | `>=9.0 <10` | `db.auth: "mongo"`, `db.sessions: "mongo"`, or `db.cache: "mongo"` |
-| `ioredis` | `>=5.0 <6` | `db.redis: true` (the default), or any store set to `"redis"` |
-| `bullmq` | `>=5.0 <6` | Workers / queues |
-
-If you're running fully on SQLite or memory (no Redis, no MongoDB), none of the optional peers are needed.
-
----
-
 ## Adding Routes
 
-Drop a file in your `routes/` directory that exports a `router` — see the [Quick Start](#3-add-a-route) example above. Routes are auto-discovered via glob — no registration needed. Subdirectories are supported, so you can organise by feature:
+Drop a file in your `routes/` directory that exports a `router` — see the [Quick Start](#quick-start) example above. Routes are auto-discovered via glob — no registration needed. Subdirectories are supported, so you can organise by feature:
 
 ```
 routes/
@@ -1800,6 +1752,48 @@ const myAdapter: AuthAdapter = {
   },
 };
 ```
+
+---
+
+## Peer Dependencies
+
+Bunshot declares the following as peer dependencies so you control their versions and avoid duplicate installs in your app.
+
+### Required
+
+These must be installed in every consuming app:
+
+```bash
+bun add hono zod
+```
+
+| Package | Required version |
+|---|---|
+| `hono` | `>=4.12 <5` |
+| `zod` | `>=4.0 <5` |
+
+### Optional
+
+Install only what your app actually uses:
+
+```bash
+# MongoDB auth / sessions / cache
+bun add mongoose
+
+# Redis sessions, cache, rate limiting, or BullMQ
+bun add ioredis
+
+# Background job queues
+bun add bullmq
+```
+
+| Package | Required version | When you need it |
+|---|---|---|
+| `mongoose` | `>=9.0 <10` | `db.auth: "mongo"`, `db.sessions: "mongo"`, or `db.cache: "mongo"` |
+| `ioredis` | `>=5.0 <6` | `db.redis: true` (the default), or any store set to `"redis"` |
+| `bullmq` | `>=5.0 <6` | Workers / queues |
+
+If you're running fully on SQLite or memory (no Redis, no MongoDB), none of the optional peers are needed.
 
 ---
 
