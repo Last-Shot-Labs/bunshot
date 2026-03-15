@@ -9,6 +9,32 @@ router.get("/protected/admin", userAuth, requireRole("admin"), (c) => {
   return c.json({ message: "admin only" });
 });
 
+router.get("/protected/multi-role", userAuth, requireRole("admin", "moderator"), (c) => {
+  return c.json({ message: "multi-role access" });
+});
+
+router.get("/protected/global-role", userAuth, requireRole.global("admin"), (c) => {
+  return c.json({ message: "global admin" });
+});
+
+router.get(
+  "/protected/tenant-admin",
+  async (c, next) => {
+    const tenantId = c.req.header("x-tenant-id") ?? null;
+    if (tenantId) c.set("tenantId", tenantId);
+    await next();
+  },
+  userAuth,
+  requireRole("admin"),
+  (c) => {
+    return c.json({ message: "tenant admin" });
+  }
+);
+
 router.get("/cached", cacheResponse({ key: "test-cached", ttl: 60, store: "memory" }), (c) => {
   return c.json({ time: Date.now() });
+});
+
+router.get("/cached-dynamic", cacheResponse({ key: (c) => "dyn:" + (c.req.query("k") ?? "default"), ttl: 60, store: "memory" }), (c) => {
+  return c.json({ time: Date.now(), key: c.req.query("k") });
 });

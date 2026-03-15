@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeAll, beforeEach } from "bun:test";
 import { createTestApp, clearMemoryStore, authHeader } from "../setup";
-import { addUserRole } from "../../src/lib/roles";
-import { bustCache } from "../../src/middleware/cacheResponse";
+import { addUserRole, setTenantRoles } from "../../src/lib/roles";
+import { bustCache, bustCachePattern } from "../../src/middleware/cacheResponse";
 import type { OpenAPIHono } from "@hono/zod-openapi";
 
 let app: OpenAPIHono<any>;
@@ -54,6 +54,92 @@ describe("requireRole middleware", () => {
 });
 
 // ---------------------------------------------------------------------------
+// requireRole — multi-role
+// ---------------------------------------------------------------------------
+
+describe("requireRole multi-role", () => {
+  test("allows access with any matching role", async () => {
+    const { token, userId } = await registerUser("multi1@example.com");
+    await addUserRole(userId, "moderator");
+    const res = await app.request("/protected/multi-role", { headers: authHeader(token) });
+    expect(res.status).toBe(200);
+  });
+
+  test("denies access when user has none of the listed roles", async () => {
+    const { token } = await registerUser("multi2@example.com");
+    const res = await app.request("/protected/multi-role", { headers: authHeader(token) });
+    expect(res.status).toBe(403);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// requireRole.global
+// ---------------------------------------------------------------------------
+
+describe("requireRole.global", () => {
+  test("returns 401 without auth", async () => {
+    const res = await app.request("/protected/global-role");
+    expect(res.status).toBe(401);
+  });
+
+  test("returns 403 without required role", async () => {
+    const { token } = await registerUser("global1@example.com");
+    const res = await app.request("/protected/global-role", { headers: authHeader(token) });
+    expect(res.status).toBe(403);
+  });
+
+  test("returns 200 with required app-wide role", async () => {
+    const { token, userId } = await registerUser("global2@example.com");
+    await addUserRole(userId, "admin");
+    const res = await app.request("/protected/global-role", { headers: authHeader(token) });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.message).toBe("global admin");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// requireRole — tenant-scoped
+// ---------------------------------------------------------------------------
+
+describe("requireRole tenant-scoped", () => {
+  test("uses tenant roles when tenantId is set", async () => {
+    const { token, userId } = await registerUser("tenant1@example.com");
+    await setTenantRoles(userId, "tenant-abc", ["admin"]);
+    const res = await app.request("/protected/tenant-admin", {
+      headers: { ...authHeader(token), "x-tenant-id": "tenant-abc" },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  test("denies access when user lacks tenant role", async () => {
+    const { token } = await registerUser("tenant2@example.com");
+    const res = await app.request("/protected/tenant-admin", {
+      headers: { ...authHeader(token), "x-tenant-id": "tenant-abc" },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  test("falls back to app-wide roles when no tenant header", async () => {
+    const { token, userId } = await registerUser("tenant3@example.com");
+    await addUserRole(userId, "admin");
+    const res = await app.request("/protected/tenant-admin", {
+      headers: authHeader(token),
+    });
+    expect(res.status).toBe(200);
+  });
+
+  test("tenant role does not grant access in different tenant", async () => {
+    const { token, userId } = await registerUser("tenant4@example.com");
+    await setTenantRoles(userId, "tenant-abc", ["admin"]);
+    const res = await app.request("/protected/tenant-admin", {
+      headers: { ...authHeader(token), "x-tenant-id": "tenant-xyz" },
+    });
+    expect(res.status).toBe(403);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // cacheResponse
 // ---------------------------------------------------------------------------
 
@@ -86,5 +172,45 @@ describe("cacheResponse middleware", () => {
     // Should be a MISS now
     const res2 = await app.request("/cached");
     expect(res2.headers.get("x-cache")).toBe("MISS");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// cacheResponse — dynamic key + bustCachePattern
+// ---------------------------------------------------------------------------
+
+describe("cacheResponse dynamic key", () => {
+  test("dynamic key function produces separate cache entries", async () => {
+    const res1 = await app.request("/cached-dynamic?k=alpha");
+    const body1 = await res1.json();
+    expect(res1.headers.get("x-cache")).toBe("MISS");
+
+    const res2 = await app.request("/cached-dynamic?k=beta");
+    expect(res2.headers.get("x-cache")).toBe("MISS");
+
+    // Same key returns HIT
+    const res3 = await app.request("/cached-dynamic?k=alpha");
+    const body3 = await res3.json();
+    expect(res3.headers.get("x-cache")).toBe("HIT");
+    expect(body3.time).toBe(body1.time);
+  });
+
+  test("bustCachePattern clears matching entries", async () => {
+    // Prime two dynamic cache entries
+    await app.request("/cached-dynamic?k=alpha");
+    await app.request("/cached-dynamic?k=beta");
+
+    // Verify cached
+    const hit = await app.request("/cached-dynamic?k=alpha");
+    expect(hit.headers.get("x-cache")).toBe("HIT");
+
+    // Bust all dynamic cache entries
+    await bustCachePattern("dyn:*");
+
+    // Both should be MISS now
+    const miss1 = await app.request("/cached-dynamic?k=alpha");
+    expect(miss1.headers.get("x-cache")).toBe("MISS");
+    const miss2 = await app.request("/cached-dynamic?k=beta");
+    expect(miss2.headers.get("x-cache")).toBe("MISS");
   });
 });

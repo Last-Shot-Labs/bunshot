@@ -71,6 +71,9 @@ function getMfaChallengeModel() {
 
 const _memoryChallenges = new Map<string, MfaChallengeRecord & { expiresAt: number }>();
 
+/** Reset all in-memory MFA challenge state. Called by clearMemoryStore(). */
+export const clearMemoryMfaChallenges = (): void => { _memoryChallenges.clear(); };
+
 // ---------------------------------------------------------------------------
 // SQLite store (reuses the existing SQLite DB instance)
 // ---------------------------------------------------------------------------

@@ -25,7 +25,7 @@ export { createResetToken, consumeResetToken, setPasswordResetStore } from "@lib
 export { createSession, getSession, deleteSession, getUserSessions, getActiveSessionCount, evictOldestSession, updateSessionLastActive, setSessionStore, deleteUserSessions, setRefreshToken, getSessionByRefreshToken, rotateRefreshToken } from "@lib/session";
 export type { SessionMetadata, SessionInfo, RefreshResult } from "@lib/session";
 export { createVerificationToken, getVerificationToken, deleteVerificationToken } from "@lib/emailVerification";
-export { createMfaChallenge, consumeMfaChallenge, replaceMfaChallengeOtp, setMfaChallengeStore, createWebAuthnRegistrationChallenge, consumeWebAuthnRegistrationChallenge } from "@lib/mfaChallenge";
+export { createMfaChallenge, consumeMfaChallenge, replaceMfaChallengeOtp, setMfaChallengeStore, createWebAuthnRegistrationChallenge, consumeWebAuthnRegistrationChallenge, clearMemoryMfaChallenges } from "@lib/mfaChallenge";
 export type { MfaChallengeData, MfaChallengeOptions, MfaChallengePurpose } from "@lib/mfaChallenge";
 export { bustAuthLimit, trackAttempt, isLimited, clearMemoryRateLimitStore } from "@lib/authRateLimit";
 export type { LimitOpts } from "@lib/authRateLimit";

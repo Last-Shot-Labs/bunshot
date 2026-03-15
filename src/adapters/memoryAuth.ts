@@ -3,6 +3,7 @@ import type { AuthAdapter, OAuthProfile, WebAuthnCredential } from "@lib/authAda
 import type { SessionMetadata, SessionInfo } from "@lib/session";
 import { getPersistSessionMetadata, getIncludeInactiveSessions } from "@lib/appConfig";
 import { clearMemoryRateLimitStore } from "@lib/authRateLimit";
+import { clearMemoryMfaChallenges } from "@lib/mfaChallenge";
 
 // ---------------------------------------------------------------------------
 // In-memory stores — module-level Maps, always ready, lost on process restart
@@ -60,6 +61,7 @@ export const clearMemoryStore = (): void => {
   _verificationTokens.clear();
   _resetTokens.clear();
   clearMemoryRateLimitStore();
+  clearMemoryMfaChallenges();
 };
 
 // ---------------------------------------------------------------------------

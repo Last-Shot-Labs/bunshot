@@ -61,3 +61,30 @@ describe("bustAuthLimit", () => {
     expect(await isLimited("test:missing", opts)).toBe(false);
   });
 });
+
+describe("window expiry", () => {
+  const shortOpts = { windowMs: 1000, max: 2 };
+
+  test("counter resets after window expires", async () => {
+    const key = "test:expiry";
+    await trackAttempt(key, shortOpts);
+    await trackAttempt(key, shortOpts);
+    expect(await isLimited(key, shortOpts)).toBe(true);
+    await Bun.sleep(1100);
+    // After window, counter should be reset
+    expect(await isLimited(key, shortOpts)).toBe(false);
+    expect(await trackAttempt(key, shortOpts)).toBe(false); // fresh counter
+  });
+
+  test("isLimited does not increment the counter", async () => {
+    const key = "test:readonly";
+    await trackAttempt(key, opts);
+    await trackAttempt(key, opts);
+    // 2 attempts, limit is 3 — not limited yet
+    expect(await isLimited(key, opts)).toBe(false);
+    expect(await isLimited(key, opts)).toBe(false);
+    expect(await isLimited(key, opts)).toBe(false);
+    // Still not limited — isLimited didn't increment
+    expect(await trackAttempt(key, opts)).toBe(true); // 3rd attempt hits limit
+  });
+});
