@@ -487,8 +487,12 @@ export const createApp = async (config: CreateAppConfig): Promise<OpenAPIHono<Ap
   }
 
   if (authConfig.mfa && enableAuthRoutes) {
-    const { setMfaChallengeStore } = await import("@lib/mfaChallenge");
+    const { setMfaChallengeStore, setMfaChallengeSqliteDb } = await import("@lib/mfaChallenge");
     setMfaChallengeStore(sessions);
+    if (sessions === "sqlite") {
+      const { getDb } = await import("./adapters/sqliteAuth");
+      setMfaChallengeSqliteDb(getDb());
+    }
     const { createMfaRouter } = await import(`${coreRoutesDir}/mfa`);
     app.route("/", createMfaRouter());
   }

@@ -36,21 +36,20 @@ const _memoryChallenges = new Map<string, { userId: string; expiresAt: number }>
 // SQLite store (reuses the existing SQLite DB instance)
 // ---------------------------------------------------------------------------
 
+let _sqliteDb: any = null;
 let _sqliteTableCreated = false;
 
+/** Must be called when store is "sqlite" to inject the db instance. */
+export const setMfaChallengeSqliteDb = (db: any) => { _sqliteDb = db; };
+
 function ensureSqliteMfaTable() {
-  if (_sqliteTableCreated) return;
-  // Lazy import to avoid circular dependency when SQLite isn't used
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { getDb } = require("../adapters/sqliteAuth");
-    getDb().run(`CREATE TABLE IF NOT EXISTS mfa_challenges (
-      token     TEXT PRIMARY KEY,
-      userId    TEXT NOT NULL,
-      expiresAt INTEGER NOT NULL
-    )`);
-    _sqliteTableCreated = true;
-  } catch { /* SQLite not initialized */ }
+  if (_sqliteTableCreated || !_sqliteDb) return;
+  _sqliteDb.run(`CREATE TABLE IF NOT EXISTS mfa_challenges (
+    token     TEXT PRIMARY KEY,
+    userId    TEXT NOT NULL,
+    expiresAt INTEGER NOT NULL
+  )`);
+  _sqliteTableCreated = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -76,8 +75,7 @@ export const createMfaChallenge = async (userId: string): Promise<string> => {
 
   if (_store === "sqlite") {
     ensureSqliteMfaTable();
-    const { getDb } = require("../adapters/sqliteAuth");
-    getDb().run(
+    _sqliteDb.run(
       "INSERT INTO mfa_challenges (token, userId, expiresAt) VALUES (?, ?, ?)",
       [token, userId, Date.now() + ttl * 1000]
     );
@@ -116,10 +114,9 @@ export const consumeMfaChallenge = async (token: string): Promise<{ userId: stri
 
   if (_store === "sqlite") {
     ensureSqliteMfaTable();
-    const { getDb } = require("../adapters/sqliteAuth");
-    const row = getDb().query<{ userId: string }, [string, number]>(
+    const row = _sqliteDb.query(
       "DELETE FROM mfa_challenges WHERE token = ? AND expiresAt > ? RETURNING userId"
-    ).get(token, Date.now());
+    ).get(token, Date.now()) as { userId: string } | null;
     return row ? { userId: row.userId } : null;
   }
 

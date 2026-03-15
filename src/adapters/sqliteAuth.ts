@@ -15,7 +15,7 @@ export const setSqliteDb = (path: string): void => {
   initSchema(_db);
 };
 
-function getDb(): Database {
+export function getDb(): Database {
   if (!_db) throw new Error("SQLite not initialized — call setSqliteDb(path) before using sqliteAuthAdapter or sessionStore: 'sqlite'");
   return _db;
 }
